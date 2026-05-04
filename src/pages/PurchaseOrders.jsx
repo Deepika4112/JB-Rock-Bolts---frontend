@@ -1,0 +1,557 @@
+import { useMemo, useState } from "react";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { Card } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { StatusBadge } from "@/components/StatusBadge";
+import { inr, fmtDate, fmtDateTime } from "@/lib/format";
+import { getCurrentUser } from "@/lib/currentUser";
+import { useConstants } from "@/lib/constants";
+import {
+    fetchPurchaseOrders, createPurchaseOrder, updatePurchaseOrder,
+    deletePurchaseOrder, fetchPurchaseOrder, openPODocument,
+    createClient, createProject, fetchProjects
+} from "@/lib/api";
+import { Pencil, Plus, Search, Trash2, Eye, FileText, Package, Truck, Clock, Printer } from "lucide-react";
+import { toast } from "sonner";
+
+const generatePONumber = () => {
+    const now = new Date();
+    const datePart = now.toISOString().slice(0, 10).replace(/-/g, "");
+    const timePart = now.toTimeString().slice(0, 8).replace(/:/g, "");
+    return `PO-${datePart}-${timePart}`;
+};
+
+const empty = () => ({
+    clientName: "", clientDropdown: "",
+    poNumber: generatePONumber(),
+    validityDate: new Date().toISOString().slice(0, 10),
+    item: "", itemDropdown: "",
+    uom: "Nos",
+    totalQuantity: 0, deliveredQuantity: 0,
+    unitPrice: 0, gst: "", freight: 0,
+    project: "",
+    paymentTerms: "",
+    deliveryDate: new Date().toISOString().slice(0, 10),
+});
+
+const isoToDateInput = (iso) => (iso ? new Date(iso).toISOString().slice(0, 10) : "");
+
+const PurchaseOrders = () => {
+    const qc = useQueryClient();
+    const { products, clients, projects, payment_terms, uom_options } = useConstants();
+
+    const { data: orders = [], isLoading } = useQuery({
+        queryKey: ["purchase-orders"],
+        queryFn: () => fetchPurchaseOrders(),
+    });
+
+    const invalidate = () => qc.invalidateQueries({ queryKey: ["purchase-orders"] });
+
+    const createMutation = useMutation({ mutationFn: createPurchaseOrder, onSuccess: invalidate });
+    const updateMutation = useMutation({ mutationFn: ({ id, body }) => updatePurchaseOrder(id, body), onSuccess: invalidate });
+    const deleteMutation = useMutation({ mutationFn: deletePurchaseOrder, onSuccess: invalidate });
+    const markOpenedMutation = useMutation({ mutationFn: (id) => fetchPurchaseOrder(id, getCurrentUser()), onSuccess: invalidate });
+
+    const clientMutation = useMutation({ mutationFn: createClient, onSuccess: () => qc.invalidateQueries({ queryKey: ["constants"] }) });
+    const projectMutation = useMutation({ mutationFn: createProject, onSuccess: () => qc.invalidateQueries({ queryKey: ["constants"] }) });
+
+    const [search, setSearch] = useState("");
+    const [dialogOpen, setDialogOpen] = useState(false);
+    const [editingId, setEditingId] = useState(null);
+    const [form, setForm] = useState(empty());
+    const [viewing, setViewing] = useState(null);
+    const [itemToDelete, setItemToDelete] = useState(null);
+
+    const [addClientOpen, setAddClientOpen] = useState(false);
+    const [addProjectOpen, setAddProjectOpen] = useState(false);
+    const [newClientName, setNewClientName] = useState("");
+    const [newClientLocation, setNewClientLocation] = useState("");
+    const [newProjectName, setNewProjectName] = useState("");
+
+    const filtered = useMemo(() => {
+        const s = search.toLowerCase();
+        if (!s) return orders;
+        return orders.filter(
+            (o) =>
+                o.client_name.toLowerCase().includes(s) ||
+                o.po_number.toLowerCase().includes(s) ||
+                (o.item || "").toLowerCase().includes(s) ||
+                (o.project || "").toLowerCase().includes(s)
+        );
+    }, [orders, search]);
+
+    const totals = useMemo(() => ({
+        tot: orders.reduce((s, o) => s + o.total_quantity, 0),
+        del: orders.reduce((s, o) => s + o.delivered_quantity, 0),
+        pending: orders.reduce((s, o) => s + o.pending_quantity, 0),
+    }), [orders]);
+
+    const effectiveItem = form.item.trim() || form.itemDropdown;
+    const effectiveClient = form.clientName?.trim() || form.clientDropdown;
+    const effectiveProject = form.project;
+
+    const { data: clientProjects = [], isLoading: isLoadingProjects } = useQuery({
+        queryKey: ["projects", effectiveClient],
+        queryFn: () => fetchProjects({ client_name: effectiveClient }),
+        enabled: !!effectiveClient,
+    });
+
+    const openNew = () => { setEditingId(null); setForm(empty()); setDialogOpen(true); };
+    const openEdit = (o) => {
+        markOpenedMutation.mutate(o.id);
+        setEditingId(o.id);
+        setForm({
+            clientName: "", clientDropdown: o.client_name,
+            poNumber: o.po_number,
+            item: "", itemDropdown: o.item,
+            uom: o.uom || "Nos",
+            totalQuantity: o.total_quantity, deliveredQuantity: o.delivered_quantity,
+            unitPrice: o.unit_price, gst: o.gst || "", freight: o.freight,
+            project: o.project || "",
+            paymentTerms: o.payment_terms || "",
+            validityDate: isoToDateInput(o.validity_date),
+            deliveryDate: isoToDateInput(o.delivery_date),
+        });
+        setDialogOpen(true);
+    };
+    const openView = (o) => { markOpenedMutation.mutate(o.id); setViewing(o); };
+    const set = (field, val) => setForm((f) => ({ ...f, [field]: val }));
+
+    const handleCreateClient = async () => {
+        if (!newClientName || !newClientLocation) return toast.error("Name and Location are required");
+        try {
+            await clientMutation.mutateAsync({ name: newClientName, location: newClientLocation });
+            set("clientDropdown", newClientName);
+            setAddClientOpen(false);
+            setNewClientName("");
+            setNewClientLocation("");
+            toast.success("Client added successfully");
+        } catch (e) { toast.error(e.message); }
+    };
+
+    const handleCreateProject = async () => {
+        if (!effectiveClient) return toast.error("Select a client first");
+        if (!newProjectName) return toast.error("Project name is required");
+        try {
+            await projectMutation.mutateAsync({ name: newProjectName, client_name: effectiveClient });
+            set("project", newProjectName);
+            setAddProjectOpen(false);
+            setNewProjectName("");
+            toast.success("Project added successfully");
+            qc.invalidateQueries({ queryKey: ["projects", effectiveClient] });
+        } catch (e) { toast.error(e.message); }
+    };
+
+    const subtotal = (Number(form.unitPrice) || 0) * (Number(form.totalQuantity) || 0);
+    const gstPercent = parseFloat((form.gst || "0").toString().replace("%", "")) || 0;
+    const gstAmount = Math.round(subtotal * gstPercent / 100);
+    const grandTotal = subtotal + gstAmount + (Number(form.freight) || 0);
+
+    const submit = async () => {
+        if (!effectiveClient || !form.poNumber || !form.totalQuantity) {
+            toast.error("Client, PO Number and Total Quantity are required");
+            return;
+        }
+        const payload = {
+            client_name: effectiveClient,
+            po_number: form.poNumber,
+            item: effectiveItem,
+            uom: form.uom,
+            project: effectiveProject || null,
+            total_quantity: Number(form.totalQuantity),
+            delivered_quantity: Number(form.deliveredQuantity),
+            unit_price: Number(form.unitPrice),
+            gst: form.gst || null,
+            freight: Number(form.freight),
+            payment_terms: form.paymentTerms || null,
+            validity_date: form.validityDate ? new Date(form.validityDate).toISOString() : null,
+            delivery_date: form.deliveryDate ? new Date(form.deliveryDate).toISOString() : null,
+        };
+        try {
+            if (editingId) {
+                await updateMutation.mutateAsync({ id: editingId, body: { ...payload, last_updated_by: getCurrentUser() } });
+                toast.success("Purchase Order updated");
+            } else {
+                await createMutation.mutateAsync({ ...payload, created_by: getCurrentUser() });
+                toast.success("Purchase Order created");
+            }
+            setDialogOpen(false);
+        } catch (e) {
+            toast.error(e.message);
+        }
+    };
+
+    const confirmRemove = async () => {
+        if (!itemToDelete) return;
+        try {
+            await deleteMutation.mutateAsync(itemToDelete);
+            toast.success("Purchase Order deleted");
+        } catch (e) {
+            toast.error(e.message);
+        }
+        setItemToDelete(null);
+    };
+
+    return (
+        <div className="space-y-6">
+            <div className="flex flex-wrap items-end justify-between gap-3">
+                <div>
+                    <h2 className="text-2xl font-bold tracking-tight text-foreground">Purchase Orders</h2>
+                    <p className="text-sm text-muted-foreground mt-1">Track POs with quantities, delivery progress and activity log.</p>
+                </div>
+                <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
+                    <DialogTrigger asChild>
+                        <Button onClick={openNew} className="bg-gradient-primary hover:opacity-90 shadow-elegant">
+                            <Plus className="h-4 w-4 mr-2" /> New Purchase Order
+                        </Button>
+                    </DialogTrigger>
+                    <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
+                        <DialogHeader>
+                            <DialogTitle>{editingId ? "Edit Purchase Order" : "Create Purchase Order"}</DialogTitle>
+                        </DialogHeader>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 py-2">
+
+                            {/* Client */}
+                            <div className="space-y-2 sm:col-span-2">
+                                <Label>Name of Client *</Label>
+                                <div className="grid grid-cols-2 gap-2">
+                                    <Select value={form.clientDropdown} onValueChange={(v) => { set("clientDropdown", v); set("clientName", ""); }}>
+                                        <SelectTrigger><SelectValue placeholder="Select client" /></SelectTrigger>
+                                        <SelectContent>
+                                            {clients.map((c) => <SelectItem key={c} value={c}>{c}</SelectItem>)}
+                                        </SelectContent>
+                                    </Select>
+                                    <Dialog open={addClientOpen} onOpenChange={setAddClientOpen}>
+                                        <DialogTrigger asChild>
+                                            <Button variant="outline">Add New Client</Button>
+                                        </DialogTrigger>
+                                        <DialogContent className="sm:max-w-[425px]">
+                                            <DialogHeader><DialogTitle>Add New Client</DialogTitle></DialogHeader>
+                                            <div className="space-y-4 py-4">
+                                                <div className="space-y-2"><Label>Client Name</Label><Input value={newClientName} onChange={e => setNewClientName(e.target.value)} /></div>
+                                                <div className="space-y-2"><Label>Location</Label><Input value={newClientLocation} onChange={e => setNewClientLocation(e.target.value)} /></div>
+                                            </div>
+                                            <DialogFooter>
+                                                <Button variant="outline" onClick={() => setAddClientOpen(false)}>Cancel</Button>
+                                                <Button onClick={handleCreateClient} disabled={clientMutation.isPending}>Add Client</Button>
+                                            </DialogFooter>
+                                        </DialogContent>
+                                    </Dialog>
+                                </div>
+                                {effectiveClient && <p className="text-xs text-muted-foreground">Using: <span className="font-medium text-foreground">{effectiveClient}</span></p>}
+                            </div>
+
+                            {/* Project */}
+                            <div className="space-y-2 sm:col-span-2">
+                                <Label>Name of Project</Label>
+                                <div className="grid grid-cols-2 gap-2">
+                                    <Select value={form.project} onValueChange={(v) => set("project", v)} disabled={!effectiveClient || isLoadingProjects}>
+                                        <SelectTrigger><SelectValue placeholder={effectiveClient ? "Select project" : "Select client first"} /></SelectTrigger>
+                                        <SelectContent>
+                                            {clientProjects.map((p) => <SelectItem key={p.id} value={p.name}>{p.name}</SelectItem>)}
+                                        </SelectContent>
+                                    </Select>
+                                    <Dialog open={addProjectOpen} onOpenChange={setAddProjectOpen}>
+                                        <DialogTrigger asChild>
+                                            <Button variant="outline">Add New Project</Button>
+                                        </DialogTrigger>
+                                        <DialogContent className="sm:max-w-[425px]">
+                                            <DialogHeader><DialogTitle>Add New Project</DialogTitle></DialogHeader>
+                                            <div className="space-y-4 py-4">
+                                                <div className="space-y-2"><Label>Project Name</Label><Input value={newProjectName} onChange={e => setNewProjectName(e.target.value)} /></div>
+                                            </div>
+                                            <DialogFooter>
+                                                <Button variant="outline" onClick={() => setAddProjectOpen(false)}>Cancel</Button>
+                                                <Button onClick={handleCreateProject} disabled={projectMutation.isPending}>Add Project</Button>
+                                            </DialogFooter>
+                                        </DialogContent>
+                                    </Dialog>
+                                </div>
+                                {effectiveProject && <p className="text-xs text-muted-foreground">Using: <span className="font-medium text-foreground">{effectiveProject}</span></p>}
+                            </div>
+
+                            {/* Item */}
+                            <div className="space-y-2 sm:col-span-2">
+                                <Label>Item (Manual)</Label>
+                                <Input placeholder="Type item name manually" value={form.item} onChange={(e) => set("item", e.target.value)} />
+                                <div className="pt-1">
+                                    <p className="text-xs text-muted-foreground mb-1">Or pick from catalogue:</p>
+                                    <Select value={form.itemDropdown} onValueChange={(v) => set("itemDropdown", v)}>
+                                        <SelectTrigger><SelectValue placeholder="Select product" /></SelectTrigger>
+                                        <SelectContent>
+                                            {products.map((p) => <SelectItem key={p} value={p}>{p}</SelectItem>)}
+                                        </SelectContent>
+                                    </Select>
+                                </div>
+                                {effectiveItem && <p className="text-xs text-muted-foreground">Using: <span className="font-medium text-foreground">{effectiveItem}</span></p>}
+                            </div>
+
+                            {/* PO Number */}
+                            <div className="space-y-2">
+                                <Label>Purchase Order No. *</Label>
+                                <Input value={form.poNumber} onChange={(e) => set("poNumber", e.target.value)} placeholder="PO-2025-XXXX" />
+                            </div>
+
+                            {/* Validity Date */}
+                            <div className="space-y-2">
+                                <Label>Purchase Validity Date</Label>
+                                <Input type="date" value={form.validityDate} onChange={(e) => set("validityDate", e.target.value)} />
+                            </div>
+
+                            {/* Total Quantity + UOM */}
+                            <div className="space-y-2 sm:col-span-2">
+                                <Label>Total Quantity *</Label>
+                                <div className="flex gap-2">
+                                    <Input type="number" min="0" className="flex-1" placeholder="Quantity" value={form.totalQuantity || ""} onChange={(e) => set("totalQuantity", e.target.value)} />
+                                    <Select value={form.uom} onValueChange={(v) => set("uom", v)}>
+                                        <SelectTrigger className="w-32"><SelectValue placeholder="UOM" /></SelectTrigger>
+                                        <SelectContent>
+                                            {uom_options.map((u) => <SelectItem key={u} value={u}>{u}</SelectItem>)}
+                                        </SelectContent>
+                                    </Select>
+                                </div>
+                            </div>
+
+                            {/* Unit Price */}
+                            <div className="space-y-2">
+                                <Label>Unit Price (INR)</Label>
+                                <Input type="number" min="0" value={form.unitPrice || ""} onChange={(e) => set("unitPrice", e.target.value)} />
+                            </div>
+
+                            {/* GST */}
+                            <div className="space-y-2">
+                                <Label>GST % (Manual)</Label>
+                                <Input type="text" placeholder="e.g. 18" value={form.gst || ""}
+                                    onChange={(e) => { const val = e.target.value; if (/^\d{0,2}%?$/.test(val)) set("gst", val); }} />
+                            </div>
+
+                            {/* Freight */}
+                            <div className="space-y-2">
+                                <Label>Freight (INR)</Label>
+                                <Input type="number" min="0" value={form.freight || ""} onChange={(e) => set("freight", e.target.value)} />
+                            </div>
+
+                            {/* Payment Terms */}
+                            <div className="space-y-2">
+                                <Label>Payment Terms</Label>
+                                <Select value={form.paymentTerms} onValueChange={(v) => set("paymentTerms", v)}>
+                                    <SelectTrigger><SelectValue placeholder="Select terms" /></SelectTrigger>
+                                    <SelectContent>
+                                        {payment_terms.map((t) => <SelectItem key={t} value={t}>{t}</SelectItem>)}
+                                    </SelectContent>
+                                </Select>
+                            </div>
+
+                            {/* Delivery Date */}
+                            <div className="space-y-2">
+                                <Label>Delivery Date</Label>
+                                <Input type="date" value={form.deliveryDate} onChange={(e) => set("deliveryDate", e.target.value)} />
+                            </div>
+
+                            {/* Summary */}
+                            <div className="sm:col-span-2 rounded-lg bg-muted/40 border border-border p-3 text-sm">
+                                <div className="flex flex-wrap gap-x-6 gap-y-1">
+                                    <span className="text-muted-foreground">Subtotal: <span className="font-semibold text-foreground">{inr(subtotal)}</span></span>
+                                    <span className="text-muted-foreground">GST {form.gst || 0}%: <span className="font-semibold text-foreground">{inr(gstAmount)}</span></span>
+                                    <span className="text-muted-foreground">Freight: <span className="font-semibold text-foreground">{inr(Number(form.freight) || 0)}</span></span>
+                                    <span className="text-muted-foreground">Grand Total: <span className="font-semibold text-foreground">{inr(grandTotal)}</span></span>
+                                </div>
+                            </div>
+                        </div>
+                        <DialogFooter>
+                            <Button variant="outline" onClick={() => setDialogOpen(false)}>Cancel</Button>
+                            <Button onClick={submit} className="bg-gradient-primary" disabled={createMutation.isPending || updateMutation.isPending}>
+                                {editingId ? "Save changes" : "Create PO"}
+                            </Button>
+                        </DialogFooter>
+                    </DialogContent>
+                </Dialog>
+            </div>
+
+            {/* Stats */}
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                <Card className="p-5 shadow-card">
+                    <div className="flex items-center gap-3">
+                        <div className="h-11 w-11 rounded-xl bg-primary/10 grid place-items-center"><FileText className="h-5 w-5 text-primary" /></div>
+                        <div><div className="text-xs uppercase tracking-wider text-muted-foreground">Total POs</div><div className="text-2xl font-bold text-foreground">{orders.length}</div></div>
+                    </div>
+                </Card>
+                <Card className="p-5 shadow-card">
+                    <div className="flex items-center gap-3">
+                        <div className="h-11 w-11 rounded-xl bg-accent/15 grid place-items-center"><Package className="h-5 w-5 text-accent" /></div>
+                        <div><div className="text-xs uppercase tracking-wider text-muted-foreground">Total Qty</div><div className="text-2xl font-bold text-foreground">{totals.tot.toLocaleString()}</div></div>
+                    </div>
+                </Card>
+                <Card className="p-5 shadow-card">
+                    <div className="flex items-center gap-3">
+                        <div className="h-11 w-11 rounded-xl bg-success/15 grid place-items-center"><Truck className="h-5 w-5 text-success" /></div>
+                        <div><div className="text-xs uppercase tracking-wider text-muted-foreground">Delivered</div><div className="text-2xl font-bold text-foreground">{totals.del.toLocaleString()}</div></div>
+                    </div>
+                </Card>
+                <Card className="p-5 shadow-card">
+                    <div className="flex items-center gap-3">
+                        <div className="h-11 w-11 rounded-xl bg-warning/15 grid place-items-center"><Clock className="h-5 w-5 text-warning" /></div>
+                        <div><div className="text-xs uppercase tracking-wider text-muted-foreground">Pending</div><div className="text-2xl font-bold text-foreground">{totals.pending.toLocaleString()}</div></div>
+                    </div>
+                </Card>
+            </div>
+
+            {/* Search */}
+            <Card className="p-4 shadow-card">
+                <div className="relative">
+                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                    <Input placeholder="Search by client, PO number, item, project..." className="pl-9" value={search} onChange={(e) => setSearch(e.target.value)} />
+                </div>
+            </Card>
+
+            {/* Table */}
+            <Card className="shadow-card overflow-hidden">
+                <div className="overflow-x-auto">
+                    <table className="w-full text-sm">
+                        <thead className="bg-muted/50 text-muted-foreground">
+                            <tr>
+                                <th className="text-left font-medium px-4 py-3">Client</th>
+                                <th className="text-left font-medium px-4 py-3">Project</th>
+                                <th className="text-left font-medium px-4 py-3">Item</th>
+                                <th className="text-left font-medium px-4 py-3">PO #</th>
+                                <th className="text-right font-medium px-4 py-3">Qty (UOM)</th>
+                                <th className="text-right font-medium px-4 py-3">Delivered</th>
+                                <th className="text-right font-medium px-4 py-3">Pending</th>
+                                <th className="text-right font-medium px-4 py-3">Grand Total</th>
+                                <th className="text-left font-medium px-4 py-3">Validity</th>
+                                <th className="text-left font-medium px-4 py-3">Status</th>
+                                <th className="text-left font-medium px-4 py-3">Last Activity</th>
+                                <th className="text-right font-medium px-4 py-3">Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {isLoading && (
+                                <tr><td colSpan={12} className="px-5 py-12 text-center text-muted-foreground">Loading...</td></tr>
+                            )}
+                            {filtered.map((o) => {
+                                const lastAct = o.last_opened_at || o.last_updated_at || o.created_at;
+                                const lastBy = o.last_opened_by || o.last_updated_by || o.created_by || "—";
+                                return (
+                                    <tr key={o.id} className="border-t border-border hover:bg-muted/30">
+                                        <td className="px-4 py-3 text-foreground">{o.client_name}</td>
+                                        <td className="px-4 py-3 text-muted-foreground">{o.project}</td>
+                                        <td className="px-4 py-3 text-muted-foreground max-w-[160px] truncate" title={o.item}>{o.item}</td>
+                                        <td className="px-4 py-3 font-medium text-foreground">{o.po_number}</td>
+                                        <td className="px-4 py-3 text-right font-semibold">{o.total_quantity} <span className="text-xs font-normal text-muted-foreground">{o.uom || "Nos"}</span></td>
+                                        <td className="px-4 py-3 text-right text-success font-medium">{o.delivered_quantity}</td>
+                                        <td className="px-4 py-3 text-right text-warning font-medium">{o.pending_quantity}</td>
+                                        <td className="px-4 py-3 text-right font-semibold">{inr(o.grand_total)}</td>
+                                        <td className="px-4 py-3 text-muted-foreground whitespace-nowrap">{o.validity_date ? fmtDate(o.validity_date) : "—"}</td>
+                                        <td className="px-4 py-3"><StatusBadge status={o.delivery_status} label={o.delivery_status} /></td>
+                                        <td className="px-4 py-3">
+                                            <div className="text-xs">
+                                                <div className="font-medium text-foreground">{lastBy}</div>
+                                                <div className="text-muted-foreground">{lastAct ? fmtDateTime(lastAct) : "—"}</div>
+                                            </div>
+                                        </td>
+                                        <td className="px-4 py-3 text-right">
+                                            <div className="inline-flex gap-1">
+                                                <Button size="icon" variant="ghost" onClick={() => openView(o)} title="View activity"><Eye className="h-4 w-4" /></Button>
+                                                <Button size="icon" variant="ghost" onClick={() => openPODocument(o.id)} title="Print PO"><Printer className="h-4 w-4" /></Button>
+                                                <Button size="icon" variant="ghost" onClick={() => openEdit(o)} title="Edit"><Pencil className="h-4 w-4" /></Button>
+                                                <Button size="icon" variant="ghost" onClick={() => setItemToDelete(o.id)} title="Delete"><Trash2 className="h-4 w-4 text-destructive" /></Button>
+                                            </div>
+                                        </td>
+                                    </tr>
+                                );
+                            })}
+                            {!isLoading && filtered.length === 0 && (
+                                <tr><td colSpan={12} className="px-5 py-12 text-center text-muted-foreground">No purchase orders found.</td></tr>
+                            )}
+                        </tbody>
+                    </table>
+                </div>
+            </Card>
+
+            {/* View / activity dialog */}
+            <Dialog open={!!viewing} onOpenChange={(o) => !o && setViewing(null)}>
+                <DialogContent className="max-w-2xl">
+                    <DialogHeader><DialogTitle>Purchase Order Details</DialogTitle></DialogHeader>
+                    {viewing && (
+                        <div className="space-y-4">
+                            <div className="grid grid-cols-2 gap-3 text-sm">
+                                <Field label="PO Number" value={viewing.po_number} />
+                                <Field label="Client" value={viewing.client_name} />
+                                <Field label="Item" value={viewing.item} full />
+                                <Field label="Project" value={viewing.project} />
+                                <Field label="UOM" value={viewing.uom || "Nos"} />
+                                <Field label="Payment Terms" value={viewing.payment_terms} />
+                                <Field label="Validity Date" value={viewing.validity_date ? fmtDate(viewing.validity_date) : "—"} />
+                                <Field label="Delivery Date" value={viewing.delivery_date ? fmtDate(viewing.delivery_date) : "—"} />
+                                <Field label="Total Quantity" value={`${viewing.total_quantity} ${viewing.uom || "Nos"}`} />
+                                <Field label="Delivered Quantity" value={viewing.delivered_quantity} />
+                                <Field label="Pending Quantity" value={viewing.pending_quantity} />
+                                <Field label="Unit Price" value={inr(viewing.unit_price)} />
+                                <Field label="GST %" value={viewing.gst || "0%"} />
+                                <Field label="Freight" value={inr(viewing.freight)} />
+                            </div>
+                            <div className="rounded-lg border border-border bg-muted/30 p-4 space-y-3">
+                                <div className="flex items-center gap-2 text-sm font-semibold text-foreground">
+                                    <Clock className="h-4 w-4 text-accent" /> Activity Log
+                                </div>
+                                <ActivityEntry label="Created By" by={viewing.created_by} at={viewing.created_at} color="primary" />
+                                <ActivityEntry label="Last Updated By" by={viewing.last_updated_by} at={viewing.last_updated_at} color="warning" />
+                                <ActivityEntry label="Last Opened By" by={viewing.last_opened_by} at={viewing.last_opened_at} color="accent" />
+                            </div>
+                        </div>
+                    )}
+                    <DialogFooter>
+                        <Button variant="outline" onClick={() => setViewing(null)}>Close</Button>
+                        {viewing && (
+                            <>
+                                <Button variant="outline" onClick={() => openPODocument(viewing.id)}>
+                                    <Printer className="h-4 w-4 mr-2" /> Print PO
+                                </Button>
+                                <Button className="bg-gradient-primary" onClick={() => { const o = viewing; setViewing(null); openEdit(o); }}>
+                                    <Pencil className="h-4 w-4 mr-2" /> Edit
+                                </Button>
+                            </>
+                        )}
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
+
+            {/* Delete confirmation */}
+            <Dialog open={!!itemToDelete} onOpenChange={(open) => !open && setItemToDelete(null)}>
+                <DialogContent className="sm:max-w-md">
+                    <DialogHeader><DialogTitle>Confirm Deletion</DialogTitle></DialogHeader>
+                    <div className="py-4">
+                        <p className="text-sm text-muted-foreground">Are you sure you want to delete this purchase order? This action cannot be undone.</p>
+                    </div>
+                    <DialogFooter>
+                        <Button variant="outline" onClick={() => setItemToDelete(null)}>Cancel</Button>
+                        <Button variant="destructive" onClick={confirmRemove} disabled={deleteMutation.isPending}>Delete</Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
+        </div>
+    );
+};
+
+const Field = ({ label, value, full }) => (
+    <div className={full ? "col-span-2" : ""}>
+        <div className="text-[11px] uppercase tracking-wider text-muted-foreground">{label}</div>
+        <div className="font-medium text-foreground break-words">{value ?? "—"}</div>
+    </div>
+);
+
+const ActivityEntry = ({ label, by, at, color }) => (
+    <div className={`flex items-start gap-3 text-xs border-l-2 border-${color}/40 pl-3`}>
+        <div className="flex-1">
+            <div className="text-[10px] uppercase tracking-wider text-muted-foreground">{label}</div>
+            <div className="font-semibold text-foreground">{by || "—"}</div>
+            <div className="text-muted-foreground">{at ? fmtDateTime(at) : "—"}</div>
+        </div>
+    </div>
+);
+
+export default PurchaseOrders;
