@@ -4,6 +4,7 @@ import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { StatusBadge } from "@/components/StatusBadge";
@@ -12,9 +13,10 @@ import { getCurrentUser } from "@/lib/currentUser";
 import {
     fetchPurchaseOrders, fetchSales, createSale, updateSale,
     deleteSale as deleteSaleApi, addSaleActivity, openInvoiceDocument, downloadInvoiceDocument,
+    uploadInvoiceFile
 } from "@/lib/api";
 import { toast } from "sonner";
-import { Plus, Truck, Clock, CreditCard, Eye, Package, User, Trash2, Search, Download } from "lucide-react";
+import { Plus, Truck, Clock, CreditCard, Eye, Package, User, Trash2, Search, Download, UploadCloud, FileText, X, Pencil } from "lucide-react";
 
 const PAYMENT_STATUS = ["Pending", "Partial", "Paid"];
 
@@ -49,6 +51,15 @@ const SalesInvoice = () => {
     const [dispatchQty, setDispatchQty] = useState("");
     const [paymentStatus, setPaymentStatus] = useState("Pending");
     const [paymentNote, setPaymentNote] = useState("");
+    const [invoiceUrl, setInvoiceUrl] = useState("");
+    const [dispatchFrom, setDispatchFrom] = useState("JB ROCK BOLTS, Survey No. 11/1, Near Hanuman Temple, Gothiva, Vadodara, Gujarat - 391110");
+    const [shipTo, setShipTo] = useState("");
+    const [billTo, setBillTo] = useState("");
+    const [manualInvoiceNumber, setManualInvoiceNumber] = useState("");
+    const [dispatchedThrough, setDispatchedThrough] = useState("");
+    const [buyersOrderNo, setBuyersOrderNo] = useState("");
+    const [paymentTerms, setPaymentTerms] = useState("");
+    const [uploadingSaleId, setUploadingSaleId] = useState(null);
 
     // Dispatch More dialog
     const [dispatchOpen, setDispatchOpen] = useState(false);
@@ -58,6 +69,20 @@ const SalesInvoice = () => {
     const [viewSale, setViewSale] = useState(null);
     const [itemToDelete, setItemToDelete] = useState(null);
     const [search, setSearch] = useState("");
+    const [editOpen, setEditOpen] = useState(false);
+    const [editingSale, setEditingSale] = useState(null);
+    // Edit form states
+    const [editInvoiceNumber, setEditInvoiceNumber] = useState("");
+    const [editDispatchedThrough, setEditDispatchedThrough] = useState("");
+    const [editBuyersOrderNo, setEditBuyersOrderNo] = useState("");
+    const [editDispatchFrom, setEditDispatchFrom] = useState("");
+    const [editShipTo, setEditShipTo] = useState("");
+    const [editBillTo, setEditBillTo] = useState("");
+    const [editPaymentTerms, setEditPaymentTerms] = useState("");
+    const [editPaymentNote, setEditPaymentNote] = useState("");
+    const [editDispatchQty, setEditDispatchQty] = useState("");
+    const [editInvoiceUrl, setEditInvoiceUrl] = useState("");
+    const [editPaymentStatus, setEditPaymentStatus] = useState("Pending");
 
     const pendingOnPO = (po) => Math.max(0, (Number(po.total_quantity) || 0) - (Number(po.delivered_quantity) || 0));
 
@@ -77,6 +102,42 @@ const SalesInvoice = () => {
         setDispatchQty("");
         setPaymentStatus("Pending");
         setPaymentNote("");
+        setInvoiceUrl("");
+        setShipTo(po?.location || "");
+        setBillTo(po?.client_name || "");
+        setManualInvoiceNumber("");
+        setDispatchedThrough("");
+        setBuyersOrderNo("");
+        setPaymentTerms(po?.payment_terms || "");
+    };
+
+    const handleInvoiceUpload = async (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+        try {
+            const data = await uploadInvoiceFile(file);
+            setInvoiceUrl(data.file_url);
+            toast.success("Invoice uploaded");
+        } catch (err) {
+            toast.error("Upload failed: " + err.message);
+        }
+    };
+
+    const handleDirectInvoiceUpload = async (e, saleId) => {
+        const file = e.target.files[0];
+        if (!file || !saleId) return;
+        const tid = toast.loading("Uploading invoice...");
+        try {
+            const data = await uploadInvoiceFile(file);
+            await updateMutation.mutateAsync({ 
+                id: saleId, 
+                body: { invoice_url: data.file_url, updated_by: getCurrentUser() } 
+            });
+            toast.success("Invoice updated", { id: tid });
+            setUploadingSaleId(null);
+        } catch (err) {
+            toast.error("Upload failed: " + err.message, { id: tid });
+        }
     };
 
     const handleAddSale = async () => {
@@ -102,6 +163,14 @@ const SalesInvoice = () => {
                 freight: calc.freight,
                 payment_status: paymentStatus,
                 payment_note: paymentNote || null,
+                invoice_url: invoiceUrl || null,
+                invoice_number: manualInvoiceNumber || null,
+                dispatch_from: dispatchFrom || null,
+                ship_to: shipTo || null,
+                bill_to: billTo || null,
+                dispatched_through: dispatchedThrough || null,
+                buyers_order_no: buyersOrderNo || null,
+                payment_terms: paymentTerms || null,
                 created_by: getCurrentUser(),
             });
             toast.success("Sale added & PO updated");
@@ -163,11 +232,80 @@ const SalesInvoice = () => {
         }
         setItemToDelete(null);
     };
+    
+    const openEditSale = (sale) => {
+        setEditingSale(sale);
+        setEditInvoiceNumber(sale.invoice_number || "");
+        setEditDispatchedThrough(sale.dispatched_through || "");
+        setEditBuyersOrderNo(sale.buyers_order_no || "");
+        setEditDispatchFrom(sale.dispatch_from || "");
+        setEditShipTo(sale.ship_to || "");
+        setEditBillTo(sale.bill_to || "");
+        setEditPaymentTerms(sale.payment_terms || "");
+        setEditPaymentNote(sale.payment_note || "");
+        setEditDispatchQty(sale.dispatched_qty.toString());
+        setEditInvoiceUrl(sale.invoice_url || "");
+        setEditPaymentStatus(sale.payment_status);
+        setEditOpen(true);
+    };
+
+    const handleUpdateSale = async () => {
+        if (!editingSale) return;
+        try {
+            await updateMutation.mutateAsync({
+                id: editingSale.id,
+                body: {
+                    invoice_number: editInvoiceNumber || null,
+                    dispatched_through: editDispatchedThrough || null,
+                    buyers_order_no: editBuyersOrderNo || null,
+                    dispatch_from: editDispatchFrom || null,
+                    ship_to: editShipTo || null,
+                    bill_to: editBillTo || null,
+                    payment_terms: editPaymentTerms || null,
+                    payment_note: editPaymentNote || null,
+                    dispatched_qty: Number(editDispatchQty),
+                    invoice_url: editInvoiceUrl || null,
+                    payment_status: editPaymentStatus,
+                    updated_by: getCurrentUser(),
+                }
+            });
+            await activityMutation.mutateAsync({
+                id: editingSale.id,
+                body: { action: "Sale Updated", note: "Sale details were modified", by: getCurrentUser(), payment_status: editPaymentStatus },
+            });
+            toast.success("Sale details updated");
+            setEditOpen(false);
+            setEditingSale(null);
+        } catch (e) {
+            toast.error(e.message);
+        }
+    };
+
+    const handleEditInvoiceUpload = async (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+        try {
+            const data = await uploadInvoiceFile(file);
+            setEditInvoiceUrl(data.file_url);
+            toast.success("Invoice uploaded");
+        } catch (err) {
+            toast.error("Upload failed: " + err.message);
+        }
+    };
 
     const poCalc = useMemo(() => {
         if (!poData || !dispatchQty) return null;
         return calcAmounts(poData, Number(dispatchQty));
     }, [poData, dispatchQty]);
+
+    const editPoCalc = useMemo(() => {
+        if (!editingSale || !editDispatchQty) return null;
+        return calcAmounts({
+            unit_price: editingSale.unit_price,
+            gst: editingSale.gst_rate,
+            freight: editingSale.freight
+        }, Number(editDispatchQty));
+    }, [editingSale, editDispatchQty]);
 
     const filteredSales = useMemo(() => {
         if (!search.trim()) return sales;
@@ -195,7 +333,7 @@ const SalesInvoice = () => {
             {/* Add New Sale Dialog */}
             <Dialog open={addOpen} onOpenChange={setAddOpen}>
                 <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
-                    <DialogHeader><DialogTitle>Add New Sale</DialogTitle></DialogHeader>
+                    <DialogHeader><DialogTitle>Add New Sales Invoice</DialogTitle></DialogHeader>
                     <div className="space-y-4 py-2">
                         <div className="space-y-1">
                             <Label>Purchase Order No. *</Label>
@@ -217,19 +355,17 @@ const SalesInvoice = () => {
                         {poData && (
                             <div className="rounded-lg border border-border bg-muted/30 p-4 space-y-3">
                                 <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Auto-filled from PO</p>
-                                <div className="grid grid-cols-2 gap-3 text-sm">
-                                    <Field label="Client" value={poData.client_name} />
-                                    <Field label="Project" value={poData.project} />
-                                    <Field label="Item" value={poData.item} full />
-                                    <Field label="Total Qty" value={`${poData.total_quantity} ${poData.uom || "Nos"}`} />
-                                    <Field label="Delivered Qty" value={poData.delivered_quantity} />
-                                    <Field label="Pending Qty" value={pendingOnPO(poData)} />
-                                    <Field label="Unit Price" value={inr(poData.unit_price)} />
-                                    <Field label="GST %" value={`${poData.gst || 0}%`} />
-                                    <Field label="Freight" value={inr(poData.freight)} />
-                                    <Field label="Payment Terms" value={poData.payment_terms} />
-                                    {poData.validity_date && <Field label="Validity" value={fmtDate(poData.validity_date)} />}
-                                </div>
+                                    <div className="grid grid-cols-2 gap-3 text-sm">
+                                        <Field label="Client" value={poData.client_name} />
+                                        <Field label="Project" value={poData.project} />
+                                        <Field label="Item" value={poData.item} full />
+                                        <Field label="Total Qty" value={`${poData.total_quantity} ${poData.uom || "Nos"}`} />
+                                        <Field label="Unit Price" value={inr(poData.unit_price)} />
+                                        <Field label="GST %" value={`${poData.gst || 0}%`} />
+                                        <Field label="Freight" value={inr(poData.freight)} />
+                                        <Field label="Payment Terms" value={poData.payment_terms} full />
+                                        {poData.validity_date && <Field label="Validity" value={fmtDate(poData.validity_date)} />}
+                                    </div>
                             </div>
                         )}
 
@@ -242,11 +378,91 @@ const SalesInvoice = () => {
                         )}
 
                         {poCalc && (
-                            <div className="rounded-lg bg-primary/5 border border-primary/20 p-3 text-sm flex flex-wrap gap-x-6 gap-y-1">
-                                <span className="text-muted-foreground">Subtotal: <b className="text-foreground">{inr(poCalc.subtotal)}</b></span>
-                                <span className="text-muted-foreground">GST {poCalc.gstRate}%: <b className="text-foreground">{inr(poCalc.gstAmount)}</b></span>
-                                <span className="text-muted-foreground">Freight: <b className="text-foreground">{inr(poCalc.freight)}</b></span>
-                                <span className="text-muted-foreground">Grand Total: <b className="text-foreground">{inr(poCalc.grandTotal)}</b></span>
+                            <div className="space-y-3">
+                                <div className="rounded-lg bg-primary/5 border border-primary/20 p-3">
+                                    <div className="flex flex-wrap gap-x-6 gap-y-2 text-sm">
+                                        <div className="flex flex-col">
+                                            <span className="text-[10px] uppercase text-muted-foreground">Total Delivered</span>
+                                            <span className="font-bold text-foreground">{(Number(poData.delivered_quantity) || 0) + Number(dispatchQty)} {poData.uom || "Nos"}</span>
+                                        </div>
+                                        <div className="flex flex-col">
+                                            <span className="text-[10px] uppercase text-muted-foreground">Remaining Pending</span>
+                                            <span className="font-bold text-orange-600">{Math.max(0, pendingOnPO(poData) - Number(dispatchQty))} {poData.uom || "Nos"}</span>
+                                        </div>
+                                        <div className="flex flex-col border-l border-primary/20 pl-4">
+                                            <span className="text-[10px] uppercase text-muted-foreground">Grand Total</span>
+                                            <span className="font-bold text-primary">{inr(poCalc.grandTotal)}</span>
+                                        </div>
+                                    </div>
+                                    <div className="mt-2 pt-2 border-t border-primary/10 flex flex-wrap gap-x-4 text-[11px] text-muted-foreground">
+                                        <span>Subtotal: {inr(poCalc.subtotal)}</span>
+                                        <span>GST {poCalc.gstRate}%: {inr(poCalc.gstAmount)}</span>
+                                        <span>Freight: {inr(poCalc.freight)}</span>
+                                    </div>
+                                </div>
+                            </div>
+                        )}
+
+                        {poData && (
+                            <div className="space-y-4 pt-2 border-t border-border">
+                                <div className="space-y-1">
+                                    <Label>Dispatch From (Source Address)</Label>
+                                    <Textarea 
+                                        placeholder="Enter source address" 
+                                        value={dispatchFrom} 
+                                        onChange={(e) => setDispatchFrom(e.target.value)}
+                                        rows={2}
+                                    />
+                                </div>
+                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                                    <div className="space-y-1">
+                                        <Label>Ship To (Delivery Address) *</Label>
+                                        <Textarea 
+                                            placeholder="Enter delivery address" 
+                                            value={shipTo} 
+                                            onChange={(e) => setShipTo(e.target.value)}
+                                            rows={3}
+                                        />
+                                    </div>
+                                    <div className="space-y-1">
+                                        <Label>Bill To (Billing Address) *</Label>
+                                        <Textarea 
+                                            placeholder="Enter billing address" 
+                                            value={billTo} 
+                                            onChange={(e) => setBillTo(e.target.value)}
+                                            rows={3}
+                                        />
+                                    </div>
+                                </div>
+                            </div>
+                        )}
+
+                        {poData && (
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-2 border-t border-border">
+                                <div className="space-y-1">
+                                    <Label>Invoice Number (Manual)</Label>
+                                    <Input 
+                                        placeholder="Enter invoice number (optional)" 
+                                        value={manualInvoiceNumber} 
+                                        onChange={(e) => setManualInvoiceNumber(e.target.value)}
+                                    />
+                                </div>
+                                <div className="space-y-1">
+                                    <Label>Dispatched Through (Manual)</Label>
+                                    <Input 
+                                        placeholder="Enter courier/transport name" 
+                                        value={dispatchedThrough} 
+                                        onChange={(e) => setDispatchedThrough(e.target.value)}
+                                    />
+                                </div>
+                                <div className="space-y-1 sm:col-span-2">
+                                    <Label>Buyer's Order No. (Manual)</Label>
+                                    <Input 
+                                        placeholder="Enter buyer's order number" 
+                                        value={buyersOrderNo} 
+                                        onChange={(e) => setBuyersOrderNo(e.target.value)}
+                                    />
+                                </div>
                             </div>
                         )}
 
@@ -261,16 +477,138 @@ const SalesInvoice = () => {
                                         </SelectContent>
                                     </Select>
                                 </div>
-                                <div className="space-y-1">
-                                    <Label>Payment Note</Label>
-                                    <Input placeholder="Optional note" value={paymentNote} onChange={(e) => setPaymentNote(e.target.value)} />
+                                <div className="space-y-1 sm:col-span-2">
+                                    <Label>Upload Invoice Document</Label>
+                                    <div className="flex items-center gap-2">
+                                        <Input type="file" className="hidden" id="invoice-file-upload" onChange={handleInvoiceUpload} accept=".pdf,.jpg,.jpeg,.png" />
+                                        <Button type="button" variant="outline" className="w-full" onClick={() => document.getElementById("invoice-file-upload").click()}>
+                                            <FileText className="h-4 w-4 mr-2" />
+                                            {invoiceUrl ? "Invoice Uploaded ✓" : "Upload Invoice"}
+                                        </Button>
+                                        {invoiceUrl && (
+                                            <Button type="button" variant="ghost" size="icon" onClick={() => setInvoiceUrl("")} title="Remove">
+                                                <X className="h-4 w-4 text-destructive" />
+                                            </Button>
+                                        )}
+                                    </div>
                                 </div>
                             </div>
                         )}
                     </div>
                     <DialogFooter>
                         <Button variant="outline" onClick={() => setAddOpen(false)}>Cancel</Button>
-                        <Button onClick={handleAddSale} className="bg-gradient-primary" disabled={createMutation.isPending}>Add Sale</Button>
+                        <Button onClick={handleAddSale} className="bg-gradient-primary" disabled={createMutation.isPending}>Add Sales Invoice</Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
+
+            {/* Edit Sale Dialog */}
+            <Dialog open={editOpen} onOpenChange={setEditOpen}>
+                <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+                    <DialogHeader><DialogTitle>Edit Sale: {editingSale?.po_number}</DialogTitle></DialogHeader>
+                    {editingSale && (
+                        <div className="space-y-4 py-2">
+                            {/* PO Context Info */}
+                            <div className="rounded-lg border border-border bg-muted/30 p-4 space-y-3">
+                                <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">PO Information (Reference)</p>
+                                <div className="grid grid-cols-2 gap-3 text-sm">
+                                    <Field label="Client" value={editingSale.client_name} />
+                                    <Field label="Project" value={editingSale.project} />
+                                    <Field label="Item" value={editingSale.item} full />
+                                    <Field label="Total PO Qty" value={`${editingSale.total_qty} ${editingSale.uom}`} />
+                                    <Field label="Payment Terms (from PO)" value={editingSale.payment_terms} full />
+                                </div>
+                            </div>
+
+                            <div className="space-y-1">
+                                <Label>Dispatch Quantity *</Label>
+                                <Input type="number" value={editDispatchQty} onChange={(e) => setEditDispatchQty(e.target.value)} />
+                            </div>
+
+                            {editPoCalc && (
+                                <div className="space-y-3">
+                                    <div className="rounded-lg bg-primary/5 border border-primary/20 p-3">
+                                        <div className="flex flex-wrap gap-x-6 gap-y-2 text-sm">
+                                            <div className="flex flex-col border-l border-primary/20 pl-4">
+                                                <span className="text-[10px] uppercase text-muted-foreground">Updated Grand Total</span>
+                                                <span className="font-bold text-primary">{inr(editPoCalc.grandTotal)}</span>
+                                            </div>
+                                        </div>
+                                        <div className="mt-2 pt-2 border-t border-primary/10 flex flex-wrap gap-x-4 text-[11px] text-muted-foreground">
+                                            <span>Subtotal: {inr(editPoCalc.subtotal)}</span>
+                                            <span>GST {editPoCalc.gstRate}%: {inr(editPoCalc.gstAmount)}</span>
+                                            <span>Freight: {inr(editPoCalc.freight)}</span>
+                                        </div>
+                                    </div>
+                                </div>
+                            )}
+
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                                <div className="space-y-1">
+                                    <Label>Invoice Number</Label>
+                                    <Input value={editInvoiceNumber} onChange={(e) => setEditInvoiceNumber(e.target.value)} />
+                                </div>
+                                <div className="space-y-1">
+                                    <Label>Dispatched Through</Label>
+                                    <Input value={editDispatchedThrough} onChange={(e) => setEditDispatchedThrough(e.target.value)} />
+                                </div>
+                                <div className="space-y-1">
+                                    <Label>Buyer's Order No.</Label>
+                                    <Input value={editBuyersOrderNo} onChange={(e) => setEditBuyersOrderNo(e.target.value)} />
+                                </div>
+                                <div className="space-y-1">
+                                    <Label>Payment Status</Label>
+                                    <Select value={editPaymentStatus} onValueChange={setEditPaymentStatus}>
+                                        <SelectTrigger><SelectValue /></SelectTrigger>
+                                        <SelectContent>
+                                            {PAYMENT_STATUS.map((s) => <SelectItem key={s} value={s}>{s}</SelectItem>)}
+                                        </SelectContent>
+                                    </Select>
+                                </div>
+                            </div>
+
+                            <div className="space-y-4 pt-2 border-t border-border">
+                                <div className="space-y-1">
+                                    <Label>Dispatch From (Source Address)</Label>
+                                    <Textarea value={editDispatchFrom} onChange={(e) => setEditDispatchFrom(e.target.value)} rows={2} />
+                                </div>
+                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                                    <div className="space-y-1">
+                                        <Label>Ship To (Delivery Address)</Label>
+                                        <Textarea value={editShipTo} onChange={(e) => setEditShipTo(e.target.value)} rows={3} />
+                                    </div>
+                                    <div className="space-y-1">
+                                        <Label>Bill To (Billing Address)</Label>
+                                        <Textarea value={editBillTo} onChange={(e) => setEditBillTo(e.target.value)} rows={3} />
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div className="space-y-1 sm:col-span-2 pt-2 border-t border-border">
+                                <Label>Upload Updated Invoice Document</Label>
+                                <div className="flex items-center gap-2">
+                                    <Input type="file" className="hidden" id="edit-invoice-file-upload" onChange={handleEditInvoiceUpload} accept=".pdf,.jpg,.jpeg,.png" />
+                                    <Button type="button" variant="outline" className="w-full" onClick={() => document.getElementById("edit-invoice-file-upload").click()}>
+                                        <FileText className="h-4 w-4 mr-2" />
+                                        {editInvoiceUrl ? "Invoice Uploaded ✓" : "Upload Invoice"}
+                                    </Button>
+                                    {editInvoiceUrl && (
+                                        <Button type="button" variant="ghost" size="icon" onClick={() => setEditInvoiceUrl("")} title="Remove">
+                                            <X className="h-4 w-4 text-destructive" />
+                                        </Button>
+                                    )}
+                                </div>
+                            </div>
+
+                            <div className="space-y-1 pt-2 border-t border-border">
+                                <Label>Update Note</Label>
+                                <Input placeholder="Optional note about this edit" value={editPaymentNote} onChange={(e) => setEditPaymentNote(e.target.value)} />
+                            </div>
+                        </div>
+                    )}
+                    <DialogFooter>
+                        <Button variant="outline" onClick={() => setEditOpen(false)}>Cancel</Button>
+                        <Button onClick={handleUpdateSale} className="bg-gradient-primary" disabled={updateMutation.isPending}>Save Changes</Button>
                     </DialogFooter>
                 </DialogContent>
             </Dialog>
@@ -313,6 +651,12 @@ const SalesInvoice = () => {
                                 <Field label="Dispatched Qty" value={`${viewSale.dispatched_qty} ${viewSale.uom}`} />
                                 <Field label="Grand Total" value={inr(viewSale.grand_total)} />
                                 <Field label="Payment Status" value={viewSale.payment_status} />
+                                <Field label="Dispatch From" value={viewSale.dispatch_from} full />
+                                <Field label="Ship To" value={viewSale.ship_to} full />
+                                <Field label="Bill To" value={viewSale.bill_to} full />
+                                <Field label="Dispatched Through" value={viewSale.dispatched_through} full />
+                                <Field label="Buyer's Order No." value={viewSale.buyers_order_no} full />
+                                <Field label="Payment Terms" value={viewSale.payment_terms} full />
                             </div>
                             <div className="rounded-lg border border-border bg-muted/30 p-4 space-y-3">
                                 <div className="flex items-center gap-2 text-sm font-semibold">
@@ -389,6 +733,28 @@ const SalesInvoice = () => {
                                             className="inline-flex items-center justify-center h-8 w-8 rounded-md hover:bg-muted transition-colors">
                                             <Eye className="h-4 w-4" />
                                         </button>
+                                        <button onClick={() => openEditSale(sale)} title="Edit Sale"
+                                            className="inline-flex items-center justify-center h-8 w-8 rounded-md hover:bg-muted transition-colors text-blue-500">
+                                            <Pencil className="h-4 w-4" />
+                                        </button>
+                                        <button 
+                                            onClick={() => {
+                                                if (sale.invoice_url) {
+                                                    window.open(`http://localhost:8000${sale.invoice_url}`, "_blank");
+                                                } else {
+                                                    setUploadingSaleId(sale.id);
+                                                    document.getElementById("direct-invoice-upload").click();
+                                                }
+                                            }} 
+                                            title={sale.invoice_url ? "View Invoice" : "Upload Invoice"}
+                                            className="inline-flex items-center justify-center h-8 w-8 rounded-md hover:bg-muted transition-colors"
+                                        >
+                                            {sale.invoice_url ? (
+                                                <FileText className="h-4 w-4 text-green-500" />
+                                            ) : (
+                                                <UploadCloud className="h-4 w-4 text-orange-500" />
+                                            )}
+                                        </button>
                                         <button onClick={() => setItemToDelete(sale.id)} title="Delete Sale"
                                             className="inline-flex items-center justify-center h-8 w-8 rounded-md hover:bg-destructive/10 text-destructive transition-colors">
                                             <Trash2 className="h-4 w-4" />
@@ -399,12 +765,14 @@ const SalesInvoice = () => {
                                 <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3 text-sm">
                                     <Field label="Item" value={sale.item} />
                                     <Field label="Project" value={sale.project} />
+                                    <Field label="PO Total Qty" value={`${sale.total_qty} ${sale.uom}`} />
                                     <Field label="Dispatched Qty" value={`${sale.dispatched_qty} ${sale.uom}`} />
-                                    <Field label="Total Delivered" value={`${totalDelivered} ${sale.uom}`} />
                                     <Field label="Pending Qty" value={`${currentPending} ${sale.uom}`} />
                                     <Field label="Grand Total" value={inr(sale.grand_total)} />
                                     <Field label="GST" value={`${sale.gst_rate}% (${inr(sale.gst_amount)})`} />
                                     <Field label="Freight" value={inr(sale.freight)} />
+                                    <Field label="Dispatched Through" value={sale.dispatched_through} />
+                                    <Field label="Buyer's Order No." value={sale.buyers_order_no} />
                                 </div>
 
                                 <div className="flex flex-wrap gap-6 text-xs border-t border-border pt-3">
@@ -455,6 +823,14 @@ const SalesInvoice = () => {
                     </DialogFooter>
                 </DialogContent>
             </Dialog>
+
+            <input 
+                type="file" 
+                id="direct-invoice-upload" 
+                className="hidden" 
+                accept=".pdf,.jpg,.jpeg,.png"
+                onChange={(e) => handleDirectInvoiceUpload(e, uploadingSaleId)} 
+            />
         </div>
     );
 };

@@ -38,6 +38,16 @@ export const fetchPurchaseOrder = (id, openedBy) =>
 export const createPurchaseOrder = (body) => post("/api/purchase-orders", body);
 export const updatePurchaseOrder = (id, body) => put(`/api/purchase-orders/${id}`, body);
 export const deletePurchaseOrder = (id) => del(`/api/purchase-orders/${id}`);
+export const uploadPOFile = async (file) => {
+    const formData = new FormData();
+    formData.append("file", file);
+    const res = await fetch(`${BASE}/api/purchase-orders/upload`, {
+        method: "POST",
+        body: formData,
+    });
+    if (!res.ok) throw new Error("Upload failed");
+    return res.json();
+};
 
 // ── Sales ────────────────────────────────────────────────────────────────────
 export const fetchSales = (params) => get("/api/sales", params);
@@ -46,6 +56,16 @@ export const createSale = (body) => post("/api/sales", body);
 export const updateSale = (id, body) => put(`/api/sales/${id}`, body);
 export const deleteSale = (id) => del(`/api/sales/${id}`);
 export const addSaleActivity = (id, body) => post(`/api/sales/${id}/activities`, body);
+export const uploadInvoiceFile = async (file) => {
+    const formData = new FormData();
+    formData.append("file", file);
+    const res = await fetch(`${BASE}/api/sales/upload`, {
+        method: "POST",
+        body: formData,
+    });
+    if (!res.ok) throw new Error("Upload failed");
+    return res.json();
+};
 
 // ── Inventory ────────────────────────────────────────────────────────────────
 export const fetchInventory = () => get("/api/inventory");
@@ -68,6 +88,7 @@ export const deleteRecord = (id) => del(`/api/records/${id}`);
 
 // ── Reports ──────────────────────────────────────────────────────────────────
 export const fetchReport = (params) => get("/api/reports", params);
+export const fetchFulfillmentReport = (params) => get("/api/reports/fulfillment", params);
 
 // ── Documents (opens in new tab for printing) ─────────────────────────────────
 export const openPODocument = (poId) => {

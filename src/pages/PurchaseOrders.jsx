@@ -13,9 +13,9 @@ import { useConstants } from "@/lib/constants";
 import {
     fetchPurchaseOrders, createPurchaseOrder, updatePurchaseOrder,
     deletePurchaseOrder, fetchPurchaseOrder, openPODocument,
-    createClient, createProject, fetchProjects
+    createClient, createProject, fetchProjects, uploadPOFile
 } from "@/lib/api";
-import { Pencil, Plus, Search, Trash2, Eye, FileText, Package, Truck, Clock, Printer } from "lucide-react";
+import { Pencil, Plus, Search, Trash2, Eye, FileText, Package, Truck, Clock, Printer, X, UploadCloud } from "lucide-react";
 import { toast } from "sonner";
 
 const generatePONumber = () => {
@@ -25,17 +25,17 @@ const generatePONumber = () => {
     return `PO-${datePart}-${timePart}`;
 };
 
+const emptyLineItem = () => ({ item: "", quantity: 0, uom: "Nos", unit_price: 0 });
+
 const empty = () => ({
     clientName: "", clientDropdown: "",
     poNumber: generatePONumber(),
     validityDate: new Date().toISOString().slice(0, 10),
-    item: "", itemDropdown: "",
-    uom: "Nos",
-    totalQuantity: 0, deliveredQuantity: 0,
-    unitPrice: 0, gst: "", freight: 0,
+    gst: "", freight: 0,
     project: "",
     paymentTerms: "",
-    deliveryDate: new Date().toISOString().slice(0, 10),
+    fileUrl: "",
+    lineItems: [emptyLineItem()],
 });
 
 const isoToDateInput = (iso) => (iso ? new Date(iso).toISOString().slice(0, 10) : "");
@@ -64,6 +64,7 @@ const PurchaseOrders = () => {
     const [editingId, setEditingId] = useState(null);
     const [form, setForm] = useState(empty());
     const [viewing, setViewing] = useState(null);
+    const [uploadingPoId, setUploadingPoId] = useState(null);
     const [itemToDelete, setItemToDelete] = useState(null);
 
     const [addClientOpen, setAddClientOpen] = useState(false);
@@ -90,7 +91,6 @@ const PurchaseOrders = () => {
         pending: orders.reduce((s, o) => s + o.pending_quantity, 0),
     }), [orders]);
 
-    const effectiveItem = form.item.trim() || form.itemDropdown;
     const effectiveClient = form.clientName?.trim() || form.clientDropdown;
     const effectiveProject = form.project;
 
@@ -104,6 +104,9 @@ const PurchaseOrders = () => {
     const openEdit = (o) => {
         markOpenedMutation.mutate(o.id);
         setEditingId(o.id);
+        const li = (o.line_items && o.line_items.length > 0)
+            ? o.line_items.map(l => ({ item: l.item, quantity: l.quantity, uom: l.uom, unit_price: l.unit_price }))
+            : [{ item: o.item || "", quantity: o.total_quantity, uom: o.uom || "Nos", unit_price: o.unit_price }];
         setForm({
             clientName: "", clientDropdown: o.client_name,
             poNumber: o.po_number,
@@ -114,7 +117,7 @@ const PurchaseOrders = () => {
             project: o.project || "",
             paymentTerms: o.payment_terms || "",
             validityDate: isoToDateInput(o.validity_date),
-            deliveryDate: isoToDateInput(o.delivery_date),
+            lineItems: li,
         });
         setDialogOpen(true);
     };
@@ -146,30 +149,81 @@ const PurchaseOrders = () => {
         } catch (e) { toast.error(e.message); }
     };
 
-    const subtotal = (Number(form.unitPrice) || 0) * (Number(form.totalQuantity) || 0);
+    const setLineItem = (idx, field, val) => {
+        setForm(f => {
+            const items = [...(f.lineItems || [])];
+            if (!items[idx]) items[idx] = emptyLineItem();
+            items[idx] = { ...items[idx], [field]: val };
+            return { ...f, lineItems: items };
+        });
+    };
+    const addLineItem = () => setForm(f => ({ 
+        ...f, 
+        lineItems: [...(f.lineItems || [emptyLineItem()]), emptyLineItem()] 
+    }));
+    const removeLineItem = (idx) => {
+        setForm(f => {
+            const items = f.lineItems || [];
+            if (items.length <= 1) return f;
+            return { ...f, lineItems: items.filter((_, i) => i !== idx) };
+        });
+    };
+
+    const subtotal = (form.lineItems || []).reduce((s, li) => s + (Number(li.quantity) || 0) * (Number(li.unit_price) || 0), 0);
     const gstPercent = parseFloat((form.gst || "0").toString().replace("%", "")) || 0;
     const gstAmount = Math.round(subtotal * gstPercent / 100);
     const grandTotal = subtotal + gstAmount + (Number(form.freight) || 0);
 
+    const handleFileUpload = async (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+        try {
+            const data = await uploadPOFile(file);
+            set("fileUrl", data.file_url);
+            toast.success("PO File uploaded");
+        } catch (err) {
+            toast.error("File upload failed: " + err.message);
+        }
+    };
+
+    const handleDirectUpload = async (e, poId) => {
+        const file = e.target.files[0];
+        if (!file || !poId) return;
+        const tid = toast.loading("Uploading file...");
+        try {
+            const data = await uploadPOFile(file);
+            await updateMutation.mutateAsync({ 
+                id: poId, 
+                body: { file_url: data.file_url, last_updated_by: getCurrentUser() } 
+            });
+            toast.success("PO Document updated", { id: tid });
+            setUploadingPoId(null);
+        } catch (err) {
+            toast.error("Upload failed: " + err.message, { id: tid });
+        }
+    };
+
     const submit = async () => {
-        if (!effectiveClient || !form.poNumber || !form.totalQuantity) {
-            toast.error("Client, PO Number and Total Quantity are required");
+        const hasItems = (form.lineItems || []).some(li => li.item.trim());
+        if (!effectiveClient || !form.poNumber || !hasItems) {
+            toast.error("Client, PO Number and at least one Item are required");
             return;
         }
         const payload = {
             client_name: effectiveClient,
             po_number: form.poNumber,
-            item: effectiveItem,
-            uom: form.uom,
-            project: effectiveProject || null,
-            total_quantity: Number(form.totalQuantity),
-            delivered_quantity: Number(form.deliveredQuantity),
-            unit_price: Number(form.unitPrice),
+            project: form.project || null,
             gst: form.gst || null,
-            freight: Number(form.freight),
+            freight: Number(form.freight) || 0,
             payment_terms: form.paymentTerms || null,
             validity_date: form.validityDate ? new Date(form.validityDate).toISOString() : null,
-            delivery_date: form.deliveryDate ? new Date(form.deliveryDate).toISOString() : null,
+            file_url: form.fileUrl || null,
+            line_items: (form.lineItems || []).map(li => ({
+                item: li.item.trim(),
+                quantity: Number(li.quantity) || 0,
+                uom: li.uom || "Nos",
+                unit_price: Number(li.unit_price) || 0
+            })).filter(li => li.item)
         };
         try {
             if (editingId) {
@@ -183,17 +237,6 @@ const PurchaseOrders = () => {
         } catch (e) {
             toast.error(e.message);
         }
-    };
-
-    const confirmRemove = async () => {
-        if (!itemToDelete) return;
-        try {
-            await deleteMutation.mutateAsync(itemToDelete);
-            toast.success("Purchase Order deleted");
-        } catch (e) {
-            toast.error(e.message);
-        }
-        setItemToDelete(null);
     };
 
     return (
@@ -215,7 +258,6 @@ const PurchaseOrders = () => {
                         </DialogHeader>
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 py-2">
 
-                            {/* Client */}
                             <div className="space-y-2 sm:col-span-2">
                                 <Label>Name of Client *</Label>
                                 <div className="grid grid-cols-2 gap-2">
@@ -245,7 +287,6 @@ const PurchaseOrders = () => {
                                 {effectiveClient && <p className="text-xs text-muted-foreground">Using: <span className="font-medium text-foreground">{effectiveClient}</span></p>}
                             </div>
 
-                            {/* Project */}
                             <div className="space-y-2 sm:col-span-2">
                                 <Label>Name of Project</Label>
                                 <div className="grid grid-cols-2 gap-2">
@@ -274,68 +315,111 @@ const PurchaseOrders = () => {
                                 {effectiveProject && <p className="text-xs text-muted-foreground">Using: <span className="font-medium text-foreground">{effectiveProject}</span></p>}
                             </div>
 
-                            {/* Item */}
-                            <div className="space-y-2 sm:col-span-2">
-                                <Label>Item (Manual)</Label>
-                                <Input placeholder="Type item name manually" value={form.item} onChange={(e) => set("item", e.target.value)} />
-                                <div className="pt-1">
-                                    <p className="text-xs text-muted-foreground mb-1">Or pick from catalogue:</p>
-                                    <Select value={form.itemDropdown} onValueChange={(v) => set("itemDropdown", v)}>
-                                        <SelectTrigger><SelectValue placeholder="Select product" /></SelectTrigger>
-                                        <SelectContent>
-                                            {products.map((p) => <SelectItem key={p} value={p}>{p}</SelectItem>)}
-                                        </SelectContent>
-                                    </Select>
-                                </div>
-                                {effectiveItem && <p className="text-xs text-muted-foreground">Using: <span className="font-medium text-foreground">{effectiveItem}</span></p>}
-                            </div>
-
-                            {/* PO Number */}
                             <div className="space-y-2">
                                 <Label>Purchase Order No. *</Label>
                                 <Input value={form.poNumber} onChange={(e) => set("poNumber", e.target.value)} placeholder="PO-2025-XXXX" />
                             </div>
 
-                            {/* Validity Date */}
                             <div className="space-y-2">
-                                <Label>Purchase Validity Date</Label>
+                                <Label>PO Validity Date</Label>
                                 <Input type="date" value={form.validityDate} onChange={(e) => set("validityDate", e.target.value)} />
                             </div>
 
-                            {/* Total Quantity + UOM */}
-                            <div className="space-y-2 sm:col-span-2">
-                                <Label>Total Quantity *</Label>
-                                <div className="flex gap-2">
-                                    <Input type="number" min="0" className="flex-1" placeholder="Quantity" value={form.totalQuantity || ""} onChange={(e) => set("totalQuantity", e.target.value)} />
-                                    <Select value={form.uom} onValueChange={(v) => set("uom", v)}>
-                                        <SelectTrigger className="w-32"><SelectValue placeholder="UOM" /></SelectTrigger>
-                                        <SelectContent>
-                                            {uom_options.map((u) => <SelectItem key={u} value={u}>{u}</SelectItem>)}
-                                        </SelectContent>
-                                    </Select>
+                            <div className="space-y-3 sm:col-span-2">
+                                <div className="flex items-center justify-between">
+                                    <Label className="text-sm font-semibold">Items *</Label>
+                                    <Button type="button" size="sm" variant="outline" onClick={addLineItem}>
+                                        <Plus className="h-3.5 w-3.5 mr-1" /> Add Item
+                                    </Button>
+                                </div>
+                                <div className="space-y-2">
+                                    {(form.lineItems || []).map((li, idx) => (
+                                        <div key={idx} className="relative rounded-lg border border-border bg-muted/20 p-4 pt-8 sm:pt-4">
+                                            {form.lineItems.length > 1 && (
+                                                <Button 
+                                                    type="button" 
+                                                    size="icon" 
+                                                    variant="ghost" 
+                                                    className="absolute top-1 right-1 h-7 w-7 text-destructive hover:bg-destructive/10" 
+                                                    onClick={() => removeLineItem(idx)}
+                                                    title="Remove item"
+                                                >
+                                                    <X className="h-4 w-4" />
+                                                </Button>
+                                            )}
+                                            
+                                            <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
+                                                <div className="sm:col-span-2 space-y-1.5">
+                                                    <Label className="text-[11px] uppercase tracking-wider text-muted-foreground">Item Name</Label>
+                                                    <Input 
+                                                        placeholder="Enter item name" 
+                                                        value={li.item} 
+                                                        onChange={(e) => setLineItem(idx, "item", e.target.value)} 
+                                                    />
+                                                </div>
+                                                <div className="space-y-1.5">
+                                                    <Label className="text-[11px] uppercase tracking-wider text-muted-foreground">Quantity</Label>
+                                                    <div className="flex gap-1">
+                                                        <Input 
+                                                            type="number" 
+                                                            min="0" 
+                                                            placeholder="Qty" 
+                                                            className="flex-1" 
+                                                            value={li.quantity || ""} 
+                                                            onChange={(e) => setLineItem(idx, "quantity", e.target.value)} 
+                                                        />
+                                                        <Select value={li.uom} onValueChange={(v) => setLineItem(idx, "uom", v)}>
+                                                            <SelectTrigger className="w-20"><SelectValue /></SelectTrigger>
+                                                            <SelectContent>
+                                                                {uom_options.length > 0 ? uom_options.map((u) => (
+                                                                    <SelectItem key={u} value={u}>{u}</SelectItem>
+                                                                )) : <SelectItem value="Nos">Nos</SelectItem>}
+                                                            </SelectContent>
+                                                        </Select>
+                                                    </div>
+                                                </div>
+                                                <div className="space-y-1.5">
+                                                    <Label className="text-[11px] uppercase tracking-wider text-muted-foreground">Unit Price</Label>
+                                                    <Input 
+                                                        type="number" 
+                                                        min="0" 
+                                                        placeholder="0.00" 
+                                                        value={li.unit_price || ""} 
+                                                        onChange={(e) => setLineItem(idx, "unit_price", e.target.value)} 
+                                                    />
+                                                </div>
+                                            </div>
+
+                                            <div className="mt-3 pt-3 border-t border-border/50 flex flex-wrap gap-x-4 gap-y-1 text-[11px]">
+                                                {(() => {
+                                                    const rowSubtotal = (Number(li.quantity) || 0) * (Number(li.unit_price) || 0);
+                                                    const rowGst = Math.round(rowSubtotal * gstPercent / 100);
+                                                    const rowTotal = rowSubtotal + rowGst;
+                                                    return (
+                                                        <>
+                                                            <span className="text-muted-foreground">Amount: <span className="font-semibold text-foreground">{inr(rowSubtotal)}</span></span>
+                                                            <span className="text-muted-foreground">GST ({gstPercent}%): <span className="font-semibold text-foreground">{inr(rowGst)}</span></span>
+                                                            <span className="text-muted-foreground">Row Total: <span className="font-semibold text-foreground text-primary">{inr(rowTotal)}</span></span>
+                                                        </>
+                                                    );
+                                                })()}
+                                            </div>
+                                        </div>
+                                    ))}
                                 </div>
                             </div>
 
-                            {/* Unit Price */}
-                            <div className="space-y-2">
-                                <Label>Unit Price (INR)</Label>
-                                <Input type="number" min="0" value={form.unitPrice || ""} onChange={(e) => set("unitPrice", e.target.value)} />
-                            </div>
-
-                            {/* GST */}
                             <div className="space-y-2">
                                 <Label>GST % (Manual)</Label>
                                 <Input type="text" placeholder="e.g. 18" value={form.gst || ""}
                                     onChange={(e) => { const val = e.target.value; if (/^\d{0,2}%?$/.test(val)) set("gst", val); }} />
                             </div>
 
-                            {/* Freight */}
                             <div className="space-y-2">
                                 <Label>Freight (INR)</Label>
                                 <Input type="number" min="0" value={form.freight || ""} onChange={(e) => set("freight", e.target.value)} />
                             </div>
 
-                            {/* Payment Terms */}
                             <div className="space-y-2">
                                 <Label>Payment Terms</Label>
                                 <Select value={form.paymentTerms} onValueChange={(v) => set("paymentTerms", v)}>
@@ -346,13 +430,22 @@ const PurchaseOrders = () => {
                                 </Select>
                             </div>
 
-                            {/* Delivery Date */}
                             <div className="space-y-2">
-                                <Label>Delivery Date</Label>
-                                <Input type="date" value={form.deliveryDate} onChange={(e) => set("deliveryDate", e.target.value)} />
+                                <Label>Upload PO Document</Label>
+                                <div className="flex items-center gap-2">
+                                    <Input type="file" className="hidden" id="po-file-upload" onChange={handleFileUpload} accept=".pdf,.jpg,.jpeg,.png" />
+                                    <Button type="button" variant="outline" className="w-full" onClick={() => document.getElementById("po-file-upload").click()}>
+                                        <FileText className="h-4 w-4 mr-2" />
+                                        {form.fileUrl ? "File Uploaded ✓" : "Upload File"}
+                                    </Button>
+                                    {form.fileUrl && (
+                                        <Button type="button" variant="ghost" size="icon" onClick={() => set("fileUrl", "")} title="Remove file">
+                                            <X className="h-4 w-4 text-destructive" />
+                                        </Button>
+                                    )}
+                                </div>
                             </div>
 
-                            {/* Summary */}
                             <div className="sm:col-span-2 rounded-lg bg-muted/40 border border-border p-3 text-sm">
                                 <div className="flex flex-wrap gap-x-6 gap-y-1">
                                     <span className="text-muted-foreground">Subtotal: <span className="font-semibold text-foreground">{inr(subtotal)}</span></span>
@@ -372,7 +465,6 @@ const PurchaseOrders = () => {
                 </Dialog>
             </div>
 
-            {/* Stats */}
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                 <Card className="p-5 shadow-card">
                     <div className="flex items-center gap-3">
@@ -400,7 +492,6 @@ const PurchaseOrders = () => {
                 </Card>
             </div>
 
-            {/* Search */}
             <Card className="p-4 shadow-card">
                 <div className="relative">
                     <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
@@ -408,7 +499,6 @@ const PurchaseOrders = () => {
                 </div>
             </Card>
 
-            {/* Table */}
             <Card className="shadow-card overflow-hidden">
                 <div className="overflow-x-auto">
                     <table className="w-full text-sm">
@@ -439,7 +529,10 @@ const PurchaseOrders = () => {
                                     <tr key={o.id} className="border-t border-border hover:bg-muted/30">
                                         <td className="px-4 py-3 text-foreground">{o.client_name}</td>
                                         <td className="px-4 py-3 text-muted-foreground">{o.project}</td>
-                                        <td className="px-4 py-3 text-muted-foreground max-w-[160px] truncate" title={o.item}>{o.item}</td>
+                                        <td className="px-4 py-3 text-muted-foreground max-w-[160px] truncate" title={(o.line_items?.length > 0) ? o.line_items.map(l => l.item).join(", ") : o.item}>
+                                            {(o.line_items?.length > 0) ? o.line_items[0].item : o.item}
+                                            {(o.line_items?.length > 1) && <span className="ml-1 text-[10px] bg-primary/10 text-primary px-1.5 py-0.5 rounded-full">+{o.line_items.length - 1}</span>}
+                                        </td>
                                         <td className="px-4 py-3 font-medium text-foreground">{o.po_number}</td>
                                         <td className="px-4 py-3 text-right font-semibold">{o.total_quantity} <span className="text-xs font-normal text-muted-foreground">{o.uom || "Nos"}</span></td>
                                         <td className="px-4 py-3 text-right text-success font-medium">{o.delivered_quantity}</td>
@@ -454,8 +547,25 @@ const PurchaseOrders = () => {
                                             </div>
                                         </td>
                                         <td className="px-4 py-3 text-right">
-                                            <div className="inline-flex gap-1">
-                                                <Button size="icon" variant="ghost" onClick={() => openView(o)} title="View activity"><Eye className="h-4 w-4" /></Button>
+                                            <div className="flex gap-1 justify-end">
+                                                <Button size="icon" variant="ghost" onClick={() => setViewing(o)} title="View details"><Eye className="h-4 w-4" /></Button>
+                                                <Button size="icon" variant="ghost" 
+                                                    onClick={() => {
+                                                        if (o.file_url) {
+                                                            window.open(`http://localhost:8000${o.file_url}`, "_blank");
+                                                        } else {
+                                                            setUploadingPoId(o.id);
+                                                            document.getElementById("direct-file-upload").click();
+                                                        }
+                                                    }} 
+                                                    title={o.file_url ? "View Uploaded PO" : "Upload PO Document"}
+                                                >
+                                                    {o.file_url ? (
+                                                        <FileText className="h-4 w-4 text-green-500" />
+                                                    ) : (
+                                                        <UploadCloud className="h-4 w-4 text-orange-500" />
+                                                    )}
+                                                </Button>
                                                 <Button size="icon" variant="ghost" onClick={() => openPODocument(o.id)} title="Print PO"><Printer className="h-4 w-4" /></Button>
                                                 <Button size="icon" variant="ghost" onClick={() => openEdit(o)} title="Edit"><Pencil className="h-4 w-4" /></Button>
                                                 <Button size="icon" variant="ghost" onClick={() => setItemToDelete(o.id)} title="Delete"><Trash2 className="h-4 w-4 text-destructive" /></Button>
@@ -472,7 +582,6 @@ const PurchaseOrders = () => {
                 </div>
             </Card>
 
-            {/* View / activity dialog */}
             <Dialog open={!!viewing} onOpenChange={(o) => !o && setViewing(null)}>
                 <DialogContent className="max-w-2xl">
                     <DialogHeader><DialogTitle>Purchase Order Details</DialogTitle></DialogHeader>
@@ -481,18 +590,46 @@ const PurchaseOrders = () => {
                             <div className="grid grid-cols-2 gap-3 text-sm">
                                 <Field label="PO Number" value={viewing.po_number} />
                                 <Field label="Client" value={viewing.client_name} />
-                                <Field label="Item" value={viewing.item} full />
                                 <Field label="Project" value={viewing.project} />
-                                <Field label="UOM" value={viewing.uom || "Nos"} />
                                 <Field label="Payment Terms" value={viewing.payment_terms} />
                                 <Field label="Validity Date" value={viewing.validity_date ? fmtDate(viewing.validity_date) : "—"} />
-                                <Field label="Delivery Date" value={viewing.delivery_date ? fmtDate(viewing.delivery_date) : "—"} />
-                                <Field label="Total Quantity" value={`${viewing.total_quantity} ${viewing.uom || "Nos"}`} />
-                                <Field label="Delivered Quantity" value={viewing.delivered_quantity} />
-                                <Field label="Pending Quantity" value={viewing.pending_quantity} />
-                                <Field label="Unit Price" value={inr(viewing.unit_price)} />
                                 <Field label="GST %" value={viewing.gst || "0%"} />
                                 <Field label="Freight" value={inr(viewing.freight)} />
+                                <Field label="Grand Total" value={inr(viewing.grand_total)} />
+                                {viewing.file_url && (
+                                    <div className="col-span-2 mt-2">
+                                        <Button variant="outline" size="sm" className="w-full" onClick={() => window.open(`http://localhost:8000${viewing.file_url}`, "_blank")}>
+                                            <FileText className="h-4 w-4 mr-2" /> View Attached PO Document
+                                        </Button>
+                                    </div>
+                                )}
+                            </div>
+                            <div className="rounded-lg border border-border overflow-hidden">
+                                <div className="bg-muted/50 px-3 py-2 text-xs font-semibold text-muted-foreground uppercase tracking-wider">Items</div>
+                                <table className="w-full text-sm">
+                                    <thead className="bg-muted/30">
+                                        <tr>
+                                            <th className="text-left px-3 py-2 font-medium text-muted-foreground">#</th>
+                                            <th className="text-left px-3 py-2 font-medium text-muted-foreground">Item</th>
+                                            <th className="text-right px-3 py-2 font-medium text-muted-foreground">Qty</th>
+                                            <th className="text-left px-3 py-2 font-medium text-muted-foreground">UOM</th>
+                                            <th className="text-right px-3 py-2 font-medium text-muted-foreground">Unit Price</th>
+                                            <th className="text-right px-3 py-2 font-medium text-muted-foreground">Amount</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {(viewing.line_items?.length > 0 ? viewing.line_items : [{ item: viewing.item, quantity: viewing.total_quantity, uom: viewing.uom, unit_price: viewing.unit_price }]).map((li, i) => (
+                                            <tr key={i} className="border-t border-border">
+                                                <td className="px-3 py-2 text-muted-foreground">{i + 1}</td>
+                                                <td className="px-3 py-2 font-medium">{li.item}</td>
+                                                <td className="px-3 py-2 text-right">{li.quantity}</td>
+                                                <td className="px-3 py-2">{li.uom || "Nos"}</td>
+                                                <td className="px-3 py-2 text-right">{inr(li.unit_price)}</td>
+                                                <td className="px-3 py-2 text-right font-semibold">{inr(li.quantity * li.unit_price)}</td>
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                </table>
                             </div>
                             <div className="rounded-lg border border-border bg-muted/30 p-4 space-y-3">
                                 <div className="flex items-center gap-2 text-sm font-semibold text-foreground">
@@ -520,7 +657,6 @@ const PurchaseOrders = () => {
                 </DialogContent>
             </Dialog>
 
-            {/* Delete confirmation */}
             <Dialog open={!!itemToDelete} onOpenChange={(open) => !open && setItemToDelete(null)}>
                 <DialogContent className="sm:max-w-md">
                     <DialogHeader><DialogTitle>Confirm Deletion</DialogTitle></DialogHeader>
@@ -529,10 +665,18 @@ const PurchaseOrders = () => {
                     </div>
                     <DialogFooter>
                         <Button variant="outline" onClick={() => setItemToDelete(null)}>Cancel</Button>
-                        <Button variant="destructive" onClick={confirmRemove} disabled={deleteMutation.isPending}>Delete</Button>
+                        <Button variant="destructive" onClick={() => { deleteMutation.mutate(itemToDelete); setItemToDelete(null); }}>Delete</Button>
                     </DialogFooter>
                 </DialogContent>
             </Dialog>
+
+            <input 
+                type="file" 
+                id="direct-file-upload" 
+                className="hidden" 
+                accept=".pdf,.jpg,.jpeg,.png"
+                onChange={(e) => handleDirectUpload(e, uploadingPoId)} 
+            />
         </div>
     );
 };
