@@ -117,6 +117,7 @@ const PurchaseOrders = () => {
             project: o.project || "",
             paymentTerms: o.payment_terms || "",
             validityDate: isoToDateInput(o.validity_date),
+            fileUrl: o.file_url || "",
             lineItems: li,
         });
         setDialogOpen(true);
@@ -202,6 +203,21 @@ const PurchaseOrders = () => {
             toast.error("Upload failed: " + err.message, { id: tid });
         }
     };
+
+    const handleDeleteFile = async (poId) => {
+        if (!window.confirm("Are you sure you want to delete this document? You can then upload a new one.")) return;
+        const tid = toast.loading("Removing document...");
+        try {
+            await updateMutation.mutateAsync({ 
+                id: poId, 
+                body: { file_url: null, last_updated_by: getCurrentUser() } 
+            });
+            toast.success("Document removed", { id: tid });
+        } catch (err) {
+            toast.error("Failed to remove document: " + err.message, { id: tid });
+        }
+    };
+
 
     const submit = async () => {
         const hasItems = (form.lineItems || []).some(li => li.item.trim());
@@ -435,13 +451,20 @@ const PurchaseOrders = () => {
                                 <div className="flex items-center gap-2">
                                     <Input type="file" className="hidden" id="po-file-upload" onChange={handleFileUpload} accept=".pdf,.jpg,.jpeg,.png" />
                                     <Button type="button" variant="outline" className="w-full" onClick={() => document.getElementById("po-file-upload").click()}>
-                                        <FileText className="h-4 w-4 mr-2" />
+                                        <FileText className={`h-4 w-4 mr-2 ${form.fileUrl ? "text-green-500" : "text-red-500"}`} />
                                         {form.fileUrl ? "File Uploaded ✓" : "Upload File"}
                                     </Button>
                                     {form.fileUrl && (
-                                        <Button type="button" variant="ghost" size="icon" onClick={() => set("fileUrl", "")} title="Remove file">
-                                            <X className="h-4 w-4 text-destructive" />
-                                        </Button>
+                                        <div className="flex flex-col gap-1 w-full">
+                                            <div className="flex items-center gap-2">
+                                                <Button type="button" variant="ghost" size="sm" onClick={() => set("fileUrl", "")} className="text-destructive hover:bg-destructive/10">
+                                                    <Trash2 className="h-4 w-4 mr-2" /> Remove upload file
+                                                </Button>
+                                                <Button type="button" variant="link" size="sm" className="text-primary text-xs" onClick={() => window.open(`http://localhost:8000${form.fileUrl}`, "_blank")}>
+                                                    View current file
+                                                </Button>
+                                            </div>
+                                        </div>
                                     )}
                                 </div>
                             </div>
@@ -563,7 +586,7 @@ const PurchaseOrders = () => {
                                                     {o.file_url ? (
                                                         <FileText className="h-4 w-4 text-green-500" />
                                                     ) : (
-                                                        <UploadCloud className="h-4 w-4 text-orange-500" />
+                                                        <UploadCloud className="h-4 w-4 text-red-500" />
                                                     )}
                                                 </Button>
                                                 <Button size="icon" variant="ghost" onClick={() => openPODocument(o.id)} title="Print PO"><Printer className="h-4 w-4" /></Button>

@@ -140,6 +140,25 @@ const SalesInvoice = () => {
         }
     };
 
+    const handleDeleteInvoice = async (saleId) => {
+        if (!window.confirm("Are you sure you want to delete this invoice? You can then upload a new one.")) return;
+        const tid = toast.loading("Removing invoice...");
+        try {
+            await updateMutation.mutateAsync({ 
+                id: saleId, 
+                body: { invoice_url: null, updated_by: getCurrentUser() } 
+            });
+            await activityMutation.mutateAsync({
+                id: saleId,
+                body: { action: "Invoice Deleted", note: "Uploaded invoice document was removed", by: getCurrentUser() },
+            });
+            toast.success("Invoice removed", { id: tid });
+        } catch (err) {
+            toast.error("Failed to remove invoice: " + err.message, { id: tid });
+        }
+    };
+
+
     const handleAddSale = async () => {
         if (!poData) { toast.error("Select a PO first"); return; }
         const qty = Number(dispatchQty);
@@ -482,13 +501,18 @@ const SalesInvoice = () => {
                                     <div className="flex items-center gap-2">
                                         <Input type="file" className="hidden" id="invoice-file-upload" onChange={handleInvoiceUpload} accept=".pdf,.jpg,.jpeg,.png" />
                                         <Button type="button" variant="outline" className="w-full" onClick={() => document.getElementById("invoice-file-upload").click()}>
-                                            <FileText className="h-4 w-4 mr-2" />
+                                            <FileText className={`h-4 w-4 mr-2 ${invoiceUrl ? "text-green-500" : "text-red-500"}`} />
                                             {invoiceUrl ? "Invoice Uploaded ✓" : "Upload Invoice"}
                                         </Button>
                                         {invoiceUrl && (
-                                            <Button type="button" variant="ghost" size="icon" onClick={() => setInvoiceUrl("")} title="Remove">
-                                                <X className="h-4 w-4 text-destructive" />
-                                            </Button>
+                                            <div className="flex items-center gap-2">
+                                                <Button type="button" variant="ghost" size="sm" onClick={() => setInvoiceUrl("")} className="text-destructive hover:bg-destructive/10">
+                                                    <Trash2 className="h-4 w-4 mr-2" /> Remove upload file
+                                                </Button>
+                                                <Button type="button" variant="link" size="sm" className="text-primary text-xs" onClick={() => window.open(`http://localhost:8000${invoiceUrl}`, "_blank")}>
+                                                    View current file
+                                                </Button>
+                                            </div>
                                         )}
                                     </div>
                                 </div>
@@ -589,13 +613,18 @@ const SalesInvoice = () => {
                                 <div className="flex items-center gap-2">
                                     <Input type="file" className="hidden" id="edit-invoice-file-upload" onChange={handleEditInvoiceUpload} accept=".pdf,.jpg,.jpeg,.png" />
                                     <Button type="button" variant="outline" className="w-full" onClick={() => document.getElementById("edit-invoice-file-upload").click()}>
-                                        <FileText className="h-4 w-4 mr-2" />
+                                        <FileText className={`h-4 w-4 mr-2 ${editInvoiceUrl ? "text-green-500" : "text-red-500"}`} />
                                         {editInvoiceUrl ? "Invoice Uploaded ✓" : "Upload Invoice"}
                                     </Button>
                                     {editInvoiceUrl && (
-                                        <Button type="button" variant="ghost" size="icon" onClick={() => setEditInvoiceUrl("")} title="Remove">
-                                            <X className="h-4 w-4 text-destructive" />
-                                        </Button>
+                                        <div className="flex items-center gap-2">
+                                            <Button type="button" variant="ghost" size="sm" onClick={() => setEditInvoiceUrl("")} className="text-destructive hover:bg-destructive/10">
+                                                <Trash2 className="h-4 w-4 mr-2" /> Remove upload file
+                                            </Button>
+                                            <Button type="button" variant="link" size="sm" className="text-primary text-xs" onClick={() => window.open(`http://localhost:8000${editInvoiceUrl}`, "_blank")}>
+                                                View current file
+                                            </Button>
+                                        </div>
                                     )}
                                 </div>
                             </div>
@@ -752,7 +781,7 @@ const SalesInvoice = () => {
                                             {sale.invoice_url ? (
                                                 <FileText className="h-4 w-4 text-green-500" />
                                             ) : (
-                                                <UploadCloud className="h-4 w-4 text-orange-500" />
+                                                <UploadCloud className="h-4 w-4 text-red-500" />
                                             )}
                                         </button>
                                         <button onClick={() => setItemToDelete(sale.id)} title="Delete Sale"
