@@ -52,11 +52,13 @@ const SalesInvoice = () => {
     const [paymentStatus, setPaymentStatus] = useState("Pending");
     const [paymentNote, setPaymentNote] = useState("");
     const [invoiceUrl, setInvoiceUrl] = useState("");
+    const [eWayBillUrl, setEWayBillUrl] = useState("");
     const [dispatchFrom, setDispatchFrom] = useState("JB ROCK BOLTS, Survey No. 11/1, Near Hanuman Temple, Gothiva, Vadodara, Gujarat - 391110");
     const [shipTo, setShipTo] = useState("");
     const [billTo, setBillTo] = useState("");
     const [manualInvoiceNumber, setManualInvoiceNumber] = useState("");
     const [dispatchedThrough, setDispatchedThrough] = useState("");
+    const [eWayBillNo, setEWayBillNo] = useState("");
     const [buyersOrderNo, setBuyersOrderNo] = useState("");
     const [paymentTerms, setPaymentTerms] = useState("");
     const [uploadingSaleId, setUploadingSaleId] = useState(null);
@@ -74,6 +76,7 @@ const SalesInvoice = () => {
     // Edit form states
     const [editInvoiceNumber, setEditInvoiceNumber] = useState("");
     const [editDispatchedThrough, setEditDispatchedThrough] = useState("");
+    const [editEWayBillNo, setEditEWayBillNo] = useState("");
     const [editBuyersOrderNo, setEditBuyersOrderNo] = useState("");
     const [editDispatchFrom, setEditDispatchFrom] = useState("");
     const [editShipTo, setEditShipTo] = useState("");
@@ -82,6 +85,7 @@ const SalesInvoice = () => {
     const [editPaymentNote, setEditPaymentNote] = useState("");
     const [editDispatchQty, setEditDispatchQty] = useState("");
     const [editInvoiceUrl, setEditInvoiceUrl] = useState("");
+    const [editEWayBillUrl, setEditEWayBillUrl] = useState("");
     const [editPaymentStatus, setEditPaymentStatus] = useState("Pending");
 
     const pendingOnPO = (po) => Math.max(0, (Number(po.total_quantity) || 0) - (Number(po.delivered_quantity) || 0));
@@ -103,10 +107,12 @@ const SalesInvoice = () => {
         setPaymentStatus("Pending");
         setPaymentNote("");
         setInvoiceUrl("");
+        setEWayBillUrl("");
         setShipTo(po?.location || "");
         setBillTo(po?.client_name || "");
         setManualInvoiceNumber("");
         setDispatchedThrough("");
+        setEWayBillNo("");
         setBuyersOrderNo("");
         setPaymentTerms(po?.payment_terms || "");
     };
@@ -118,6 +124,18 @@ const SalesInvoice = () => {
             const data = await uploadInvoiceFile(file);
             setInvoiceUrl(data.file_url);
             toast.success("Invoice uploaded");
+        } catch (err) {
+            toast.error("Upload failed: " + err.message);
+        }
+    };
+
+    const handleEWayBillUpload = async (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+        try {
+            const data = await uploadInvoiceFile(file);
+            setEWayBillUrl(data.file_url);
+            toast.success("e-Way bill uploaded");
         } catch (err) {
             toast.error("Upload failed: " + err.message);
         }
@@ -183,11 +201,13 @@ const SalesInvoice = () => {
                 payment_status: paymentStatus,
                 payment_note: paymentNote || null,
                 invoice_url: invoiceUrl || null,
+                e_way_bill_url: eWayBillUrl || null,
                 invoice_number: manualInvoiceNumber || null,
                 dispatch_from: dispatchFrom || null,
                 ship_to: shipTo || null,
                 bill_to: billTo || null,
                 dispatched_through: dispatchedThrough || null,
+                e_way_bill_no: eWayBillNo || null,
                 buyers_order_no: buyersOrderNo || null,
                 payment_terms: paymentTerms || null,
                 created_by: getCurrentUser(),
@@ -256,6 +276,7 @@ const SalesInvoice = () => {
         setEditingSale(sale);
         setEditInvoiceNumber(sale.invoice_number || "");
         setEditDispatchedThrough(sale.dispatched_through || "");
+        setEditEWayBillNo(sale.e_way_bill_no || "");
         setEditBuyersOrderNo(sale.buyers_order_no || "");
         setEditDispatchFrom(sale.dispatch_from || "");
         setEditShipTo(sale.ship_to || "");
@@ -264,6 +285,7 @@ const SalesInvoice = () => {
         setEditPaymentNote(sale.payment_note || "");
         setEditDispatchQty(sale.dispatched_qty.toString());
         setEditInvoiceUrl(sale.invoice_url || "");
+        setEditEWayBillUrl(sale.e_way_bill_url || "");
         setEditPaymentStatus(sale.payment_status);
         setEditOpen(true);
     };
@@ -276,6 +298,7 @@ const SalesInvoice = () => {
                 body: {
                     invoice_number: editInvoiceNumber || null,
                     dispatched_through: editDispatchedThrough || null,
+                    e_way_bill_no: editEWayBillNo || null,
                     buyers_order_no: editBuyersOrderNo || null,
                     dispatch_from: editDispatchFrom || null,
                     ship_to: editShipTo || null,
@@ -284,6 +307,7 @@ const SalesInvoice = () => {
                     payment_note: editPaymentNote || null,
                     dispatched_qty: Number(editDispatchQty),
                     invoice_url: editInvoiceUrl || null,
+                    e_way_bill_url: editEWayBillUrl || null,
                     payment_status: editPaymentStatus,
                     updated_by: getCurrentUser(),
                 }
@@ -307,6 +331,18 @@ const SalesInvoice = () => {
             const data = await uploadInvoiceFile(file);
             setEditInvoiceUrl(data.file_url);
             toast.success("Invoice uploaded");
+        } catch (err) {
+            toast.error("Upload failed: " + err.message);
+        }
+    };
+
+    const handleEditEWayBillUpload = async (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+        try {
+            const data = await uploadInvoiceFile(file);
+            setEditEWayBillUrl(data.file_url);
+            toast.success("e-Way bill uploaded");
         } catch (err) {
             toast.error("Upload failed: " + err.message);
         }
@@ -389,105 +425,159 @@ const SalesInvoice = () => {
                         )}
 
                         {poData && (
-                            <div className="space-y-1">
-                                <Label>Dispatch Quantity * <span className="text-xs text-muted-foreground">(max: {pendingOnPO(poData)} {poData.uom || "Nos"})</span></Label>
-                                <Input type="number" min="1" max={pendingOnPO(poData)} placeholder="Enter quantity to dispatch"
-                                    value={dispatchQty} onChange={(e) => setDispatchQty(e.target.value)} />
-                            </div>
-                        )}
-
-                        {poCalc && (
-                            <div className="space-y-3">
-                                <div className="rounded-lg bg-primary/5 border border-primary/20 p-3">
-                                    <div className="flex flex-wrap gap-x-6 gap-y-2 text-sm">
-                                        <div className="flex flex-col">
-                                            <span className="text-[10px] uppercase text-muted-foreground">Total Delivered</span>
-                                            <span className="font-bold text-foreground">{(Number(poData.delivered_quantity) || 0) + Number(dispatchQty)} {poData.uom || "Nos"}</span>
-                                        </div>
-                                        <div className="flex flex-col">
-                                            <span className="text-[10px] uppercase text-muted-foreground">Remaining Pending</span>
-                                            <span className="font-bold text-orange-600">{Math.max(0, pendingOnPO(poData) - Number(dispatchQty))} {poData.uom || "Nos"}</span>
-                                        </div>
-                                        <div className="flex flex-col border-l border-primary/20 pl-4">
-                                            <span className="text-[10px] uppercase text-muted-foreground">Grand Total</span>
-                                            <span className="font-bold text-primary">{inr(poCalc.grandTotal)}</span>
-                                        </div>
-                                    </div>
-                                    <div className="mt-2 pt-2 border-t border-primary/10 flex flex-wrap gap-x-4 text-[11px] text-muted-foreground">
-                                        <span>Subtotal: {inr(poCalc.subtotal)}</span>
-                                        <span>GST {poCalc.gstRate}%: {inr(poCalc.gstAmount)}</span>
-                                        <span>Freight: {inr(poCalc.freight)}</span>
-                                    </div>
-                                </div>
-                            </div>
-                        )}
-
-                        {poData && (
-                            <div className="space-y-4 pt-2 border-t border-border">
-                                <div className="space-y-1">
-                                    <Label>Dispatch From (Source Address)</Label>
-                                    <Textarea 
-                                        placeholder="Enter source address" 
-                                        value={dispatchFrom} 
-                                        onChange={(e) => setDispatchFrom(e.target.value)}
-                                        rows={2}
-                                    />
-                                </div>
-                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                            <div className="space-y-4">
+                                {/* 1. Invoice Details */}
+                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-2 border-t border-border">
                                     <div className="space-y-1">
-                                        <Label>Ship To (Delivery Address) *</Label>
-                                        <Textarea 
-                                            placeholder="Enter delivery address" 
-                                            value={shipTo} 
-                                            onChange={(e) => setShipTo(e.target.value)}
-                                            rows={3}
+                                        <Label>Invoice Number (Manual)</Label>
+                                        <Input 
+                                            placeholder="Enter invoice number (optional)" 
+                                            value={manualInvoiceNumber} 
+                                            onChange={(e) => setManualInvoiceNumber(e.target.value)}
                                         />
                                     </div>
                                     <div className="space-y-1">
-                                        <Label>Bill To (Billing Address) *</Label>
-                                        <Textarea 
-                                            placeholder="Enter billing address" 
-                                            value={billTo} 
-                                            onChange={(e) => setBillTo(e.target.value)}
-                                            rows={3}
+                                        <Label>Upload Invoice Document</Label>
+                                        <div className="flex items-center gap-2">
+                                            <Input type="file" className="hidden" id="invoice-file-upload" onChange={handleInvoiceUpload} accept=".pdf,.jpg,.jpeg,.png" />
+                                            <Button type="button" variant="outline" className="w-full" onClick={() => document.getElementById("invoice-file-upload").click()}>
+                                                <FileText className={`h-4 w-4 mr-2 ${invoiceUrl ? "text-green-500" : "text-red-500"}`} />
+                                                {invoiceUrl ? "Invoice Uploaded ✓" : "Upload Invoice"}
+                                            </Button>
+                                            {invoiceUrl && (
+                                                <div className="flex items-center gap-2">
+                                                    <Button type="button" variant="ghost" size="sm" onClick={() => setInvoiceUrl("")} className="text-destructive hover:bg-destructive/10">
+                                                        <Trash2 className="h-4 w-4 mr-2" />
+                                                    </Button>
+                                                    <Button type="button" variant="link" size="sm" className="text-primary text-xs" onClick={() => window.open(`http://localhost:8000${invoiceUrl}`, "_blank")}>
+                                                        View
+                                                    </Button>
+                                                </div>
+                                            )}
+                                        </div>
+                                    </div>
+                                </div>
+
+                                {/* 2. e-Way Bill Details */}
+                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-2 border-t border-border">
+                                    <div className="space-y-1">
+                                        <Label>e-Way Bill No.</Label>
+                                        <Input 
+                                            placeholder="Enter e-Way bill number" 
+                                            value={eWayBillNo} 
+                                            onChange={(e) => setEWayBillNo(e.target.value)}
+                                        />
+                                    </div>
+                                    <div className="space-y-1">
+                                        <Label>Upload e-Way Bill Document</Label>
+                                        <div className="flex items-center gap-2">
+                                            <Input type="file" className="hidden" id="eway-file-upload" onChange={handleEWayBillUpload} accept=".pdf,.jpg,.jpeg,.png" />
+                                            <Button type="button" variant="outline" className="w-full" onClick={() => document.getElementById("eway-file-upload").click()}>
+                                                <Truck className={`h-4 w-4 mr-2 ${eWayBillUrl ? "text-green-500" : "text-red-500"}`} />
+                                                {eWayBillUrl ? "e-Way Bill Uploaded ✓" : "Upload e-Way Bill"}
+                                            </Button>
+                                            {eWayBillUrl && (
+                                                <div className="flex items-center gap-2">
+                                                    <Button type="button" variant="ghost" size="sm" onClick={() => setEWayBillUrl("")} className="text-destructive hover:bg-destructive/10">
+                                                        <Trash2 className="h-4 w-4 mr-2" />
+                                                    </Button>
+                                                    <Button type="button" variant="link" size="sm" className="text-primary text-xs" onClick={() => window.open(`http://localhost:8000${eWayBillUrl}`, "_blank")}>
+                                                        View
+                                                    </Button>
+                                                </div>
+                                            )}
+                                        </div>
+                                    </div>
+                                </div>
+
+                                {/* 3. Buyer's Order & 4. Dispatched Through */}
+                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-2 border-t border-border">
+                                    <div className="space-y-1">
+                                        <Label>Buyer's Order No. (Manual)</Label>
+                                        <Input 
+                                            placeholder="Enter buyer's order number" 
+                                            value={buyersOrderNo} 
+                                            onChange={(e) => setBuyersOrderNo(e.target.value)}
+                                        />
+                                    </div>
+                                    <div className="space-y-1">
+                                        <Label>Dispatched Through (Manual)</Label>
+                                        <Input 
+                                            placeholder="Enter courier/transport name" 
+                                            value={dispatchedThrough} 
+                                            onChange={(e) => setDispatchedThrough(e.target.value)}
                                         />
                                     </div>
                                 </div>
-                            </div>
-                        )}
 
-                        {poData && (
-                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-2 border-t border-border">
-                                <div className="space-y-1">
-                                    <Label>Invoice Number (Manual)</Label>
-                                    <Input 
-                                        placeholder="Enter invoice number (optional)" 
-                                        value={manualInvoiceNumber} 
-                                        onChange={(e) => setManualInvoiceNumber(e.target.value)}
-                                    />
+                                {/* Addresses */}
+                                <div className="space-y-4 pt-2 border-t border-border">
+                                    <div className="space-y-1">
+                                        <Label>Dispatch From (Source Address)</Label>
+                                        <Textarea 
+                                            placeholder="Enter source address" 
+                                            value={dispatchFrom} 
+                                            onChange={(e) => setDispatchFrom(e.target.value)}
+                                            rows={2}
+                                        />
+                                    </div>
+                                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                                        <div className="space-y-1">
+                                            <Label>Ship To (Delivery Address) *</Label>
+                                            <Textarea 
+                                                placeholder="Enter delivery address" 
+                                                value={shipTo} 
+                                                onChange={(e) => setShipTo(e.target.value)}
+                                                rows={3}
+                                            />
+                                        </div>
+                                        <div className="space-y-1">
+                                            <Label>Bill To (Billing Address) *</Label>
+                                            <Textarea 
+                                                placeholder="Enter billing address" 
+                                                value={billTo} 
+                                                onChange={(e) => setBillTo(e.target.value)}
+                                                rows={3}
+                                            />
+                                        </div>
+                                    </div>
                                 </div>
-                                <div className="space-y-1">
-                                    <Label>Dispatched Through (Manual)</Label>
-                                    <Input 
-                                        placeholder="Enter courier/transport name" 
-                                        value={dispatchedThrough} 
-                                        onChange={(e) => setDispatchedThrough(e.target.value)}
-                                    />
-                                </div>
-                                <div className="space-y-1 sm:col-span-2">
-                                    <Label>Buyer's Order No. (Manual)</Label>
-                                    <Input 
-                                        placeholder="Enter buyer's order number" 
-                                        value={buyersOrderNo} 
-                                        onChange={(e) => setBuyersOrderNo(e.target.value)}
-                                    />
-                                </div>
-                            </div>
-                        )}
 
-                        {poData && (
-                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                                <div className="space-y-1">
+                                {/* Dispatch Quantity */}
+                                <div className="space-y-1 pt-2 border-t border-border">
+                                    <Label>Dispatch Quantity * <span className="text-xs text-muted-foreground">(max: {pendingOnPO(poData)} {poData.uom || "Nos"})</span></Label>
+                                    <Input type="number" min="1" max={pendingOnPO(poData)} placeholder="Enter quantity to dispatch"
+                                        value={dispatchQty} onChange={(e) => setDispatchQty(e.target.value)} />
+                                </div>
+
+                                {poCalc && (
+                                    <div className="space-y-3">
+                                        <div className="rounded-lg bg-primary/5 border border-primary/20 p-3">
+                                            <div className="flex flex-wrap gap-x-6 gap-y-2 text-sm">
+                                                <div className="flex flex-col">
+                                                    <span className="text-[10px] uppercase text-muted-foreground">Total Delivered</span>
+                                                    <span className="font-bold text-foreground">{(Number(poData.delivered_quantity) || 0) + Number(dispatchQty)} {poData.uom || "Nos"}</span>
+                                                </div>
+                                                <div className="flex flex-col">
+                                                    <span className="text-[10px] uppercase text-muted-foreground">Remaining Pending</span>
+                                                    <span className="font-bold text-orange-600">{Math.max(0, pendingOnPO(poData) - Number(dispatchQty))} {poData.uom || "Nos"}</span>
+                                                </div>
+                                                <div className="flex flex-col border-l border-primary/20 pl-4">
+                                                    <span className="text-[10px] uppercase text-muted-foreground">Grand Total</span>
+                                                    <span className="font-bold text-primary">{inr(poCalc.grandTotal)}</span>
+                                                </div>
+                                            </div>
+                                            <div className="mt-2 pt-2 border-t border-primary/10 flex flex-wrap gap-x-4 text-[11px] text-muted-foreground">
+                                                <span>Subtotal: {inr(poCalc.subtotal)}</span>
+                                                <span>GST {poCalc.gstRate}%: {inr(poCalc.gstAmount)}</span>
+                                                <span>Freight: {inr(poCalc.freight)}</span>
+                                            </div>
+                                        </div>
+                                    </div>
+                                )}
+
+                                {/* Payment Status */}
+                                <div className="space-y-1 pt-2 border-t border-border">
                                     <Label>Payment Status</Label>
                                     <Select value={paymentStatus} onValueChange={setPaymentStatus}>
                                         <SelectTrigger><SelectValue /></SelectTrigger>
@@ -495,26 +585,6 @@ const SalesInvoice = () => {
                                             {PAYMENT_STATUS.map((s) => <SelectItem key={s} value={s}>{s}</SelectItem>)}
                                         </SelectContent>
                                     </Select>
-                                </div>
-                                <div className="space-y-1 sm:col-span-2">
-                                    <Label>Upload Invoice Document</Label>
-                                    <div className="flex items-center gap-2">
-                                        <Input type="file" className="hidden" id="invoice-file-upload" onChange={handleInvoiceUpload} accept=".pdf,.jpg,.jpeg,.png" />
-                                        <Button type="button" variant="outline" className="w-full" onClick={() => document.getElementById("invoice-file-upload").click()}>
-                                            <FileText className={`h-4 w-4 mr-2 ${invoiceUrl ? "text-green-500" : "text-red-500"}`} />
-                                            {invoiceUrl ? "Invoice Uploaded ✓" : "Upload Invoice"}
-                                        </Button>
-                                        {invoiceUrl && (
-                                            <div className="flex items-center gap-2">
-                                                <Button type="button" variant="ghost" size="sm" onClick={() => setInvoiceUrl("")} className="text-destructive hover:bg-destructive/10">
-                                                    <Trash2 className="h-4 w-4 mr-2" /> Remove upload file
-                                                </Button>
-                                                <Button type="button" variant="link" size="sm" className="text-primary text-xs" onClick={() => window.open(`http://localhost:8000${invoiceUrl}`, "_blank")}>
-                                                    View current file
-                                                </Button>
-                                            </div>
-                                        )}
-                                    </div>
                                 </div>
                             </div>
                         )}
@@ -544,7 +614,94 @@ const SalesInvoice = () => {
                                 </div>
                             </div>
 
-                            <div className="space-y-1">
+                            {/* 1. Invoice Details */}
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-2 border-t border-border">
+                                <div className="space-y-1">
+                                    <Label>Invoice Number</Label>
+                                    <Input value={editInvoiceNumber} onChange={(e) => setEditInvoiceNumber(e.target.value)} />
+                                </div>
+                                <div className="space-y-1">
+                                    <Label>Upload Updated Invoice Document</Label>
+                                    <div className="flex items-center gap-2">
+                                        <Input type="file" className="hidden" id="edit-invoice-file-upload" onChange={handleEditInvoiceUpload} accept=".pdf,.jpg,.jpeg,.png" />
+                                        <Button type="button" variant="outline" className="w-full" onClick={() => document.getElementById("edit-invoice-file-upload").click()}>
+                                            <FileText className={`h-4 w-4 mr-2 ${editInvoiceUrl ? "text-green-500" : "text-red-500"}`} />
+                                            {editInvoiceUrl ? "Invoice Uploaded ✓" : "Upload Invoice"}
+                                        </Button>
+                                        {editInvoiceUrl && (
+                                            <div className="flex items-center gap-2">
+                                                <Button type="button" variant="ghost" size="sm" onClick={() => setEditInvoiceUrl("")} className="text-destructive hover:bg-destructive/10">
+                                                    <Trash2 className="h-4 w-4 mr-2" />
+                                                </Button>
+                                                <Button type="button" variant="link" size="sm" className="text-primary text-xs" onClick={() => window.open(`http://localhost:8000${editInvoiceUrl}`, "_blank")}>
+                                                    View
+                                                </Button>
+                                            </div>
+                                        )}
+                                    </div>
+                                </div>
+                            </div>
+
+                            {/* 2. e-Way Bill Details */}
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-2 border-t border-border">
+                                <div className="space-y-1">
+                                    <Label>e-Way Bill No.</Label>
+                                    <Input value={editEWayBillNo} onChange={(e) => setEditEWayBillNo(e.target.value)} />
+                                </div>
+                                <div className="space-y-1">
+                                    <Label>Upload Updated e-Way Bill Document</Label>
+                                    <div className="flex items-center gap-2">
+                                        <Input type="file" className="hidden" id="edit-eway-file-upload" onChange={handleEditEWayBillUpload} accept=".pdf,.jpg,.jpeg,.png" />
+                                        <Button type="button" variant="outline" className="w-full" onClick={() => document.getElementById("edit-eway-file-upload").click()}>
+                                            <Truck className={`h-4 w-4 mr-2 ${editEWayBillUrl ? "text-green-500" : "text-red-500"}`} />
+                                            {editEWayBillUrl ? "e-Way Bill Uploaded ✓" : "Upload e-Way Bill"}
+                                        </Button>
+                                        {editEWayBillUrl && (
+                                            <div className="flex items-center gap-2">
+                                                <Button type="button" variant="ghost" size="sm" onClick={() => setEditEWayBillUrl("")} className="text-destructive hover:bg-destructive/10">
+                                                    <Trash2 className="h-4 w-4 mr-2" />
+                                                </Button>
+                                                <Button type="button" variant="link" size="sm" className="text-primary text-xs" onClick={() => window.open(`http://localhost:8000${editEWayBillUrl}`, "_blank")}>
+                                                    View
+                                                </Button>
+                                            </div>
+                                        )}
+                                    </div>
+                                </div>
+                            </div>
+
+                            {/* 3. Buyer's Order & 4. Dispatched Through */}
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-2 border-t border-border">
+                                <div className="space-y-1">
+                                    <Label>Buyer's Order No.</Label>
+                                    <Input value={editBuyersOrderNo} onChange={(e) => setEditBuyersOrderNo(e.target.value)} />
+                                </div>
+                                <div className="space-y-1">
+                                    <Label>Dispatched Through</Label>
+                                    <Input value={editDispatchedThrough} onChange={(e) => setEditDispatchedThrough(e.target.value)} />
+                                </div>
+                            </div>
+
+                            {/* Addresses */}
+                            <div className="space-y-4 pt-2 border-t border-border">
+                                <div className="space-y-1">
+                                    <Label>Dispatch From (Source Address)</Label>
+                                    <Textarea value={editDispatchFrom} onChange={(e) => setEditDispatchFrom(e.target.value)} rows={2} />
+                                </div>
+                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                                    <div className="space-y-1">
+                                        <Label>Ship To (Delivery Address)</Label>
+                                        <Textarea value={editShipTo} onChange={(e) => setEditShipTo(e.target.value)} rows={3} />
+                                    </div>
+                                    <div className="space-y-1">
+                                        <Label>Bill To (Billing Address)</Label>
+                                        <Textarea value={editBillTo} onChange={(e) => setEditBillTo(e.target.value)} rows={3} />
+                                    </div>
+                                </div>
+                            </div>
+
+                            {/* Dispatch Quantity */}
+                            <div className="space-y-1 pt-2 border-t border-border">
                                 <Label>Dispatch Quantity *</Label>
                                 <Input type="number" value={editDispatchQty} onChange={(e) => setEditDispatchQty(e.target.value)} />
                             </div>
@@ -567,19 +724,8 @@ const SalesInvoice = () => {
                                 </div>
                             )}
 
-                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                                <div className="space-y-1">
-                                    <Label>Invoice Number</Label>
-                                    <Input value={editInvoiceNumber} onChange={(e) => setEditInvoiceNumber(e.target.value)} />
-                                </div>
-                                <div className="space-y-1">
-                                    <Label>Dispatched Through</Label>
-                                    <Input value={editDispatchedThrough} onChange={(e) => setEditDispatchedThrough(e.target.value)} />
-                                </div>
-                                <div className="space-y-1">
-                                    <Label>Buyer's Order No.</Label>
-                                    <Input value={editBuyersOrderNo} onChange={(e) => setEditBuyersOrderNo(e.target.value)} />
-                                </div>
+                            {/* Payment Status */}
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-2 border-t border-border">
                                 <div className="space-y-1">
                                     <Label>Payment Status</Label>
                                     <Select value={editPaymentStatus} onValueChange={setEditPaymentStatus}>
@@ -589,49 +735,10 @@ const SalesInvoice = () => {
                                         </SelectContent>
                                     </Select>
                                 </div>
-                            </div>
-
-                            <div className="space-y-4 pt-2 border-t border-border">
                                 <div className="space-y-1">
-                                    <Label>Dispatch From (Source Address)</Label>
-                                    <Textarea value={editDispatchFrom} onChange={(e) => setEditDispatchFrom(e.target.value)} rows={2} />
+                                    <Label>Update Note</Label>
+                                    <Input placeholder="Optional note about this edit" value={editPaymentNote} onChange={(e) => setEditPaymentNote(e.target.value)} />
                                 </div>
-                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                                    <div className="space-y-1">
-                                        <Label>Ship To (Delivery Address)</Label>
-                                        <Textarea value={editShipTo} onChange={(e) => setEditShipTo(e.target.value)} rows={3} />
-                                    </div>
-                                    <div className="space-y-1">
-                                        <Label>Bill To (Billing Address)</Label>
-                                        <Textarea value={editBillTo} onChange={(e) => setEditBillTo(e.target.value)} rows={3} />
-                                    </div>
-                                </div>
-                            </div>
-
-                            <div className="space-y-1 sm:col-span-2 pt-2 border-t border-border">
-                                <Label>Upload Updated Invoice Document</Label>
-                                <div className="flex items-center gap-2">
-                                    <Input type="file" className="hidden" id="edit-invoice-file-upload" onChange={handleEditInvoiceUpload} accept=".pdf,.jpg,.jpeg,.png" />
-                                    <Button type="button" variant="outline" className="w-full" onClick={() => document.getElementById("edit-invoice-file-upload").click()}>
-                                        <FileText className={`h-4 w-4 mr-2 ${editInvoiceUrl ? "text-green-500" : "text-red-500"}`} />
-                                        {editInvoiceUrl ? "Invoice Uploaded ✓" : "Upload Invoice"}
-                                    </Button>
-                                    {editInvoiceUrl && (
-                                        <div className="flex items-center gap-2">
-                                            <Button type="button" variant="ghost" size="sm" onClick={() => setEditInvoiceUrl("")} className="text-destructive hover:bg-destructive/10">
-                                                <Trash2 className="h-4 w-4 mr-2" /> Remove upload file
-                                            </Button>
-                                            <Button type="button" variant="link" size="sm" className="text-primary text-xs" onClick={() => window.open(`http://localhost:8000${editInvoiceUrl}`, "_blank")}>
-                                                View current file
-                                            </Button>
-                                        </div>
-                                    )}
-                                </div>
-                            </div>
-
-                            <div className="space-y-1 pt-2 border-t border-border">
-                                <Label>Update Note</Label>
-                                <Input placeholder="Optional note about this edit" value={editPaymentNote} onChange={(e) => setEditPaymentNote(e.target.value)} />
                             </div>
                         </div>
                     )}
@@ -684,6 +791,15 @@ const SalesInvoice = () => {
                                 <Field label="Ship To" value={viewSale.ship_to} full />
                                 <Field label="Bill To" value={viewSale.bill_to} full />
                                 <Field label="Dispatched Through" value={viewSale.dispatched_through} full />
+                                <Field label="e-Way Bill No." value={viewSale.e_way_bill_no} />
+                                <div className="col-span-1">
+                                    <div className="text-[11px] uppercase tracking-wider text-muted-foreground">e-Way Bill Doc</div>
+                                    {viewSale.e_way_bill_url ? (
+                                        <Button type="button" variant="link" size="sm" className="p-0 h-auto text-primary" onClick={() => window.open(`http://localhost:8000${viewSale.e_way_bill_url}`, "_blank")}>
+                                            View e-Way Bill
+                                        </Button>
+                                    ) : <span className="text-xs text-muted-foreground">—</span>}
+                                </div>
                                 <Field label="Buyer's Order No." value={viewSale.buyers_order_no} full />
                                 <Field label="Payment Terms" value={viewSale.payment_terms} full />
                             </div>
@@ -784,6 +900,24 @@ const SalesInvoice = () => {
                                                 <UploadCloud className="h-4 w-4 text-red-500" />
                                             )}
                                         </button>
+                                        <button 
+                                            onClick={() => {
+                                                if (sale.e_way_bill_url) {
+                                                    window.open(`http://localhost:8000${sale.e_way_bill_url}`, "_blank");
+                                                } else {
+                                                    setUploadingSaleId(sale.id);
+                                                    document.getElementById("direct-eway-upload").click();
+                                                }
+                                            }} 
+                                            title={sale.e_way_bill_url ? "View e-Way Bill" : "Upload e-Way Bill"}
+                                            className="inline-flex items-center justify-center h-8 w-8 rounded-md hover:bg-muted transition-colors"
+                                        >
+                                            {sale.e_way_bill_url ? (
+                                                <Truck className="h-4 w-4 text-green-500" />
+                                            ) : (
+                                                <Truck className="h-4 w-4 text-red-500" />
+                                            )}
+                                        </button>
                                         <button onClick={() => setItemToDelete(sale.id)} title="Delete Sale"
                                             className="inline-flex items-center justify-center h-8 w-8 rounded-md hover:bg-destructive/10 text-destructive transition-colors">
                                             <Trash2 className="h-4 w-4" />
@@ -827,6 +961,22 @@ const SalesInvoice = () => {
                                     <Button size="sm" variant="outline" onClick={() => downloadInvoiceDocument(sale.id)}>
                                         <Download className="h-4 w-4 mr-1" /> Download Invoice
                                     </Button>
+                                    <Button 
+                                        size="sm" 
+                                        variant="outline" 
+                                        onClick={() => {
+                                            if (sale.e_way_bill_url) {
+                                                window.open(`http://localhost:8000${sale.e_way_bill_url}`, "_blank");
+                                            } else {
+                                                setUploadingSaleId(sale.id);
+                                                document.getElementById("direct-eway-upload").click();
+                                            }
+                                        }}
+                                        className={sale.e_way_bill_url ? "text-green-600 border-green-200 hover:bg-green-50" : ""}
+                                    >
+                                        <Truck className="h-4 w-4 mr-1" />
+                                        {sale.e_way_bill_url ? "View e-Way Bill" : "Upload e-Way Bill"}
+                                    </Button>
                                     {PAYMENT_STATUS.filter((s) => s !== sale.payment_status).map((s) => (
                                         <Button key={s} size="sm" variant="outline" onClick={() => handlePaymentUpdate(sale.id, s)}>
                                             <CreditCard className="h-4 w-4 mr-1" /> Mark {s}
@@ -859,6 +1009,28 @@ const SalesInvoice = () => {
                 className="hidden" 
                 accept=".pdf,.jpg,.jpeg,.png"
                 onChange={(e) => handleDirectInvoiceUpload(e, uploadingSaleId)} 
+            />
+            <input 
+                type="file" 
+                id="direct-eway-upload" 
+                className="hidden" 
+                accept=".pdf,.jpg,.jpeg,.png"
+                onChange={async (e) => {
+                    const file = e.target.files[0];
+                    if (!file || !uploadingSaleId) return;
+                    const tid = toast.loading("Uploading e-way bill...");
+                    try {
+                        const data = await uploadInvoiceFile(file);
+                        await updateMutation.mutateAsync({ 
+                            id: uploadingSaleId, 
+                            body: { e_way_bill_url: data.file_url, updated_by: getCurrentUser() } 
+                        });
+                        toast.success("e-Way bill updated", { id: tid });
+                        setUploadingSaleId(null);
+                    } catch (err) {
+                        toast.error("Upload failed: " + err.message, { id: tid });
+                    }
+                }} 
             />
         </div>
     );
