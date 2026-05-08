@@ -3,13 +3,13 @@ import { fetchConstants } from "@/lib/api";
 
 const FALLBACK = {
     products: [],
-    uom_options: [],
+    uom_options: ["Nos", "MT", "Kg", "Ton", "Set", "Meter", "Sqm", "Cum", "Ltr", "Box", "Unit", "ZNS"],
     clients: [],
     locations: [],
     projects: [],
     payment_terms: [],
     payment_statuses: ["Pending", "Partial", "Paid"],
-    delivery_statuses: ["Pending", "Delivered"],
+    delivery_statuses: ["Not Delivered", "Delivered"],
     inventory_statuses: ["In Stock", "Low Stock", "Out of Stock"],
 };
 

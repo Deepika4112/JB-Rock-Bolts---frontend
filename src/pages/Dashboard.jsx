@@ -136,7 +136,7 @@ const Dashboard = () => {
                                     <td className="px-5 py-3 text-muted-foreground">{r.product}</td>
                                     <td className="px-5 py-3 text-right font-semibold">{inr(r.price)}</td>
                                     <td className="px-5 py-3"><StatusBadge status={r.payment_status} /></td>
-                                    <td className="px-5 py-3"><StatusBadge status={r.delivery_status === "Delivered" ? "Delivered" : "Pending"} /></td>
+                                    <td className="px-5 py-3"><StatusBadge status={r.delivery_status === "Delivered" ? "Delivered" : "Not Delivered"} /></td>
                                 </tr>
                             ))}
                             {recent.length === 0 && (
