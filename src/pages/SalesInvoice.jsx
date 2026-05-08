@@ -41,13 +41,27 @@ const SalesInvoice = () => {
 
     const createMutation = useMutation({ mutationFn: createSale, onSuccess: invalidateSales });
     const updateMutation = useMutation({ mutationFn: ({ id, body }) => updateSale(id, body), onSuccess: invalidateSales });
-    const deleteMutation = useMutation({ mutationFn: deleteSaleApi, onSuccess: invalidateSales });
+    const deleteMutation = useMutation({ 
+        mutationFn: deleteSaleApi, 
+        onSuccess: () => {
+            invalidateSales();
+            toast.success("Sale record deleted successfully");
+        },
+        onError: (err) => {
+            toast.error(err.message || "Failed to delete sale record");
+        }
+    });
     const activityMutation = useMutation({ mutationFn: ({ id, body }) => addSaleActivity(id, body), onSuccess: () => qc.invalidateQueries({ queryKey: ["sales"] }) });
 
     // Add Sale dialog
     const [addOpen, setAddOpen] = useState(false);
     const [selectedPO, setSelectedPO] = useState("");
     const [poData, setPoData] = useState(null);
+    const [selectedLineItemId, setSelectedLineItemId] = useState("");
+    const [manualItem, setManualItem] = useState("");
+    const [manualUnitPrice, setManualUnitPrice] = useState("");
+    const [manualGstRate, setManualGstRate] = useState("");
+    const [manualFreight, setManualFreight] = useState("");
     const [dispatchQty, setDispatchQty] = useState("");
     const [paymentStatus, setPaymentStatus] = useState("Pending");
     const [paymentNote, setPaymentNote] = useState("");
@@ -63,6 +77,8 @@ const SalesInvoice = () => {
     const [paymentTerms, setPaymentTerms] = useState("");
     const [hsnCode, setHsnCode] = useState("");
     const [uploadingSaleId, setUploadingSaleId] = useState(null);
+    const [dispatchItems, setDispatchItems] = useState([]); // List of items for current dispatch
+    const [manualTotalGstRate, setManualTotalGstRate] = useState(""); // Manual override for total GST %
 
     // Dispatch More dialog
     const [dispatchOpen, setDispatchOpen] = useState(false);
@@ -88,9 +104,34 @@ const SalesInvoice = () => {
     const [editInvoiceUrl, setEditInvoiceUrl] = useState("");
     const [editEWayBillUrl, setEditEWayBillUrl] = useState("");
     const [editPaymentStatus, setEditPaymentStatus] = useState("Pending");
+    const [editManualItem, setEditManualItem] = useState("");
+    const [editManualUnitPrice, setEditManualUnitPrice] = useState("");
+    const [editManualGstRate, setEditManualGstRate] = useState("");
+    const [editManualFreight, setEditManualFreight] = useState("");
     const [editHsnCode, setEditHsnCode] = useState("");
 
-    const pendingOnPO = (po) => Math.max(0, (Number(po.total_quantity) || 0) - (Number(po.delivered_quantity) || 0));
+    const pendingOnPO = (po) => {
+        if (!po) return 0;
+        return Math.max(0, (Number(po.total_quantity) || 0) - (Number(po.delivered_quantity) || 0));
+    };
+
+    const getRealTimePending = (lineItemId) => {
+        if (!poData) return 0;
+        let basePending = 0;
+        if (lineItemId === "default" || !lineItemId) {
+            basePending = pendingOnPO(poData);
+        } else {
+            const li = poData.line_items?.find(x => x.id.toString() === lineItemId.toString());
+            basePending = li ? (li.quantity - li.delivered_quantity) : 0;
+        }
+        const alreadyStaged = dispatchItems
+            .filter(item => {
+                if (lineItemId === "default" || !lineItemId) return item.line_item_id === null;
+                return item.line_item_id?.toString() === lineItemId.toString();
+            })
+            .reduce((acc, item) => acc + item.quantity, 0);
+        return Math.max(0, basePending - alreadyStaged);
+    };
 
     const calcAmounts = (po, qty) => {
         const unitPrice = Number(po.unit_price) || 0;
@@ -106,18 +147,42 @@ const SalesInvoice = () => {
         const po = orders.find((o) => o.po_number === poNumber);
         setPoData(po || null);
         setDispatchQty("");
+        setSelectedLineItemId("");
+        
+        const firstItem = po?.line_items?.[0];
+        if (po?.line_items?.length === 1 && firstItem) {
+            setSelectedLineItemId(firstItem.id.toString());
+            setManualItem(firstItem.item);
+            setManualUnitPrice(firstItem.unit_price.toString());
+        } else {
+            setManualItem(po?.item || "");
+            setManualUnitPrice(po?.unit_price?.toString() || "");
+        }
+        
+        setManualGstRate(parseFloat((po?.gst || "18").toString().replace("%", "")) || 18);
+        setManualFreight(po?.freight?.toString() || "0");
+        
         setPaymentStatus("Pending");
         setPaymentNote("");
         setInvoiceUrl("");
         setEWayBillUrl("");
         setShipTo(po?.location || "");
-        setBillTo(po?.client_name || "");
+        setBillTo(""); // Leave empty as requested (don't fill name here)
         setManualInvoiceNumber("");
         setDispatchedThrough("");
         setEWayBillNo("");
         setBuyersOrderNo("");
         setPaymentTerms(po?.payment_terms || "");
         setHsnCode("");
+    };
+
+    const handleItemChange = (liId) => {
+        setSelectedLineItemId(liId);
+        const li = poData?.line_items?.find(x => x.id.toString() === liId);
+        if (li) {
+            setManualItem(li.item);
+            setManualUnitPrice(li.unit_price.toString());
+        }
     };
 
     const handleInvoiceUpload = async (e) => {
@@ -180,27 +245,79 @@ const SalesInvoice = () => {
     };
 
 
+    const addItemToDispatch = () => {
+        if (!manualItem || !dispatchQty || Number(dispatchQty) <= 0) {
+            toast.error("Please select an item and enter valid quantity");
+            return;
+        }
+
+        const calc = calcAmounts({
+            unit_price: manualUnitPrice,
+            gst: manualGstRate,
+            freight: 0 // Freight is handled at dispatch level
+        }, Number(dispatchQty));
+
+        const pending = getRealTimePending(selectedLineItemId);
+        if (Number(dispatchQty) > pending) {
+            toast.error(`Only ${pending} remaining for this item in this dispatch`);
+            return;
+        }
+
+        const li = poData.line_items?.find(x => x.id.toString() === selectedLineItemId);
+
+        const newItem = {
+            line_item_id: selectedLineItemId === "default" ? null : Number(selectedLineItemId),
+            item: manualItem,
+            uom: li ? li.uom : (poData.uom || "Nos"),
+            quantity: Number(dispatchQty),
+            po_pending: pending - Number(dispatchQty), // The NEW pending after this add
+            unit_price: Number(manualUnitPrice),
+            gst_rate: Number(manualGstRate),
+            subtotal: calc.subtotal,
+            gst_amount: calc.gstAmount,
+            total_amount: calc.grandTotal
+        };
+
+        setDispatchItems([...dispatchItems, newItem]);
+        
+        // Reset item fields but keep common ones
+        setManualItem("");
+        setDispatchQty("");
+        setSelectedLineItemId("");
+        setManualUnitPrice("");
+        setManualGstRate("18");
+    };
+
+    const removeItemFromDispatch = (index) => {
+        setDispatchItems(dispatchItems.filter((_, i) => i !== index));
+    };
+
     const handleAddSale = async () => {
         if (!poData) { toast.error("Select a PO first"); return; }
-        const qty = Number(dispatchQty);
-        if (!qty || qty <= 0) { toast.error("Enter dispatch quantity"); return; }
-        const maxDispatch = pendingOnPO(poData);
-        if (qty > maxDispatch) { toast.error(`Cannot dispatch more than pending qty (${maxDispatch})`); return; }
-        const calc = calcAmounts(poData, qty);
+        if (dispatchItems.length === 0) { toast.error("Add at least one item"); return; }
+        
+        const subtotal = dispatchItems.reduce((acc, item) => acc + item.subtotal, 0);
+        const calculatedGstAmt = dispatchItems.reduce((acc, item) => acc + item.gst_amount, 0);
+        
+        let gst_amount = calculatedGstAmt;
+        if (manualTotalGstRate !== "") {
+            gst_amount = Math.round(subtotal * (Number(manualTotalGstRate) / 100));
+        }
+
+        const freight = Number(manualFreight) || 0;
+        const grand_total = subtotal + gst_amount + freight;
+        
         try {
             await createMutation.mutateAsync({
                 po_id: poData.id,
                 po_number: poData.po_number,
                 client_name: poData.client_name,
-                item: poData.item,
                 project: poData.project,
-                uom: poData.uom || "Nos",
-                dispatched_qty: qty,
-                total_qty: Number(poData.total_quantity) || 0,
-                previous_delivered: Number(poData.delivered_quantity) || 0,
-                unit_price: calc.unitPrice,
-                gst_rate: calc.gstRate,
-                freight: calc.freight,
+                items: dispatchItems,
+                subtotal,
+                gst_amount,
+                freight,
+                grand_total,
                 payment_status: paymentStatus,
                 payment_note: paymentNote || null,
                 invoice_url: invoiceUrl || null,
@@ -216,10 +333,11 @@ const SalesInvoice = () => {
                 hsn_code: hsnCode || null,
                 created_by: getCurrentUser(),
             });
-            toast.success("Sale added & PO updated");
+            toast.success("Sales Invoice created");
             setAddOpen(false);
             setSelectedPO("");
             setPoData(null);
+            setDispatchItems([]);
         } catch (e) {
             toast.error(e.message);
         }
@@ -228,28 +346,11 @@ const SalesInvoice = () => {
     const openDispatch = (sale) => { setDispatchTarget(sale); setDispatchAdd(""); setDispatchOpen(true); };
 
     const handleDispatch = async () => {
-        const qty = Number(dispatchAdd);
-        if (!qty || qty <= 0) { toast.error("Enter quantity to dispatch"); return; }
-        const po = orders.find((o) => o.id === dispatchTarget.po_id);
-        const remaining = po ? pendingOnPO(po) : 0;
-        if (qty > remaining) { toast.error(`Only ${remaining} pending on this PO`); return; }
-        try {
-            await updateMutation.mutateAsync({
-                id: dispatchTarget.id,
-                body: {
-                    dispatched_qty: dispatchTarget.dispatched_qty + qty,
-                    updated_by: getCurrentUser(),
-                },
-            });
-            await activityMutation.mutateAsync({
-                id: dispatchTarget.id,
-                body: { action: "Additional Dispatch", note: `Dispatched ${qty} more ${dispatchTarget.uom}`, by: getCurrentUser(), payment_status: dispatchTarget.payment_status },
-            });
-            toast.success("Dispatch updated");
-            setDispatchOpen(false);
-        } catch (e) {
-            toast.error(e.message);
-        }
+        // Since the system now supports multi-item sales, "Dispatch More" 
+        // should ideally add new items or create a new sale.
+        // For now, to avoid errors, we recommend creating a new Sale instead.
+        toast.info("Please create a new Sale entry for additional dispatches.");
+        setDispatchOpen(false);
     };
 
     const handlePaymentUpdate = async (saleId, status) => {
@@ -278,6 +379,11 @@ const SalesInvoice = () => {
     
     const openEditSale = (sale) => {
         setEditingSale(sale);
+        const firstItem = sale.items?.[0] || {};
+        setEditManualItem(firstItem.item || "");
+        setEditManualUnitPrice(firstItem.unit_price?.toString() || "");
+        setEditManualGstRate(firstItem.gst_rate?.toString() || "");
+        setEditManualFreight(sale.freight?.toString() || "");
         setEditInvoiceNumber(sale.invoice_number || "");
         setEditDispatchedThrough(sale.dispatched_through || "");
         setEditEWayBillNo(sale.e_way_bill_no || "");
@@ -288,7 +394,10 @@ const SalesInvoice = () => {
         setEditPaymentTerms(sale.payment_terms || "");
         setEditPaymentNote(sale.payment_note || "");
         setEditHsnCode(sale.hsn_code || "");
-        setEditDispatchQty(sale.dispatched_qty.toString());
+        
+        const totalQty = sale.items?.reduce((acc, i) => acc + (Number(i.quantity) || 0), 0) || 0;
+        setEditDispatchQty(totalQty.toString());
+        
         setEditInvoiceUrl(sale.invoice_url || "");
         setEditEWayBillUrl(sale.e_way_bill_url || "");
         setEditPaymentStatus(sale.payment_status);
@@ -301,6 +410,7 @@ const SalesInvoice = () => {
             await updateMutation.mutateAsync({
                 id: editingSale.id,
                 body: {
+                    freight: Number(editManualFreight),
                     invoice_number: editInvoiceNumber || null,
                     dispatched_through: editDispatchedThrough || null,
                     e_way_bill_no: editEWayBillNo || null,
@@ -310,7 +420,6 @@ const SalesInvoice = () => {
                     bill_to: editBillTo || null,
                     payment_terms: editPaymentTerms || null,
                     payment_note: editPaymentNote || null,
-                    dispatched_qty: Number(editDispatchQty),
                     invoice_url: editInvoiceUrl || null,
                     e_way_bill_url: editEWayBillUrl || null,
                     payment_status: editPaymentStatus,
@@ -356,24 +465,28 @@ const SalesInvoice = () => {
 
     const poCalc = useMemo(() => {
         if (!poData || !dispatchQty) return null;
-        return calcAmounts(poData, Number(dispatchQty));
-    }, [poData, dispatchQty]);
+        return calcAmounts({
+            unit_price: manualUnitPrice,
+            gst: manualGstRate,
+            freight: manualFreight
+        }, Number(dispatchQty));
+    }, [poData, dispatchQty, manualUnitPrice, manualGstRate, manualFreight]);
 
     const editPoCalc = useMemo(() => {
         if (!editingSale || !editDispatchQty) return null;
         return calcAmounts({
-            unit_price: editingSale.unit_price,
-            gst: editingSale.gst_rate,
-            freight: editingSale.freight
+            unit_price: editManualUnitPrice,
+            gst: editManualGstRate,
+            freight: editManualFreight
         }, Number(editDispatchQty));
-    }, [editingSale, editDispatchQty]);
+    }, [editingSale, editDispatchQty, editManualUnitPrice, editManualGstRate, editManualFreight]);
 
     const filteredSales = useMemo(() => {
         if (!search.trim()) return sales;
         const q = search.toLowerCase();
         return sales.filter((s) =>
-            s.po_number.toLowerCase().includes(q) ||
-            s.client_name.toLowerCase().includes(q) ||
+            (s.po_number || "").toLowerCase().includes(q) ||
+            (s.client_name || "").toLowerCase().includes(q) ||
             (s.item || "").toLowerCase().includes(q) ||
             (s.project || "").toLowerCase().includes(q)
         );
@@ -414,24 +527,29 @@ const SalesInvoice = () => {
                         </div>
 
                         {poData && (
-                            <div className="rounded-lg border border-border bg-muted/30 p-4 space-y-3">
-                                <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Auto-filled from PO</p>
+                            <div className="space-y-6">
+
+                                {/* AUTO-FILLED INFO */}
+                                <div className="rounded-lg border border-border bg-muted/30 p-4 space-y-3">
+                                    <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Auto-filled from PO</p>
                                     <div className="grid grid-cols-2 gap-3 text-sm">
                                         <Field label="Client" value={poData.client_name} />
                                         <Field label="Project" value={poData.project} />
-                                        <Field label="Item" value={poData.item} full />
-                                        <Field label="Total Qty" value={`${poData.total_quantity} ${poData.uom || "Nos"}`} />
-                                        <Field label="Unit Price" value={inr(poData.unit_price)} />
+                                        {(!poData.line_items || poData.line_items.length <= 1) && (
+                                            <>
+                                                <Field label="Item" value={poData.item} full />
+                                                <Field label="Total Qty" value={`${poData.total_quantity} ${poData.uom || "Nos"}`} />
+                                                <Field label="Unit Price" value={inr(poData.unit_price)} />
+                                            </>
+                                        )}
                                         <Field label="GST %" value={`${poData.gst || 0}%`} />
                                         <Field label="Freight" value={inr(poData.freight)} />
                                         <Field label="Payment Terms" value={poData.payment_terms} full />
                                         {poData.validity_date && <Field label="Validity" value={fmtDate(poData.validity_date)} />}
                                     </div>
-                            </div>
-                        )}
+                                </div>
 
-                        {poData && (
-                            <div className="space-y-4">
+
                                 {/* 1. Invoice Details */}
                                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-2 border-t border-border">
                                     <div className="space-y-1">
@@ -547,17 +665,146 @@ const SalesInvoice = () => {
                                             />
                                         </div>
                                     </div>
+
                                 </div>
 
-                                {/* Dispatch Quantity */}
-                                <div className="space-y-1 pt-2 border-t border-border">
-                                    <Label>Dispatch Quantity * <span className="text-xs text-muted-foreground">(max: {pendingOnPO(poData)} {poData.uom || "Nos"})</span></Label>
-                                    <Input type="number" min="1" max={pendingOnPO(poData)} placeholder="Enter quantity to dispatch"
-                                        value={dispatchQty} onChange={(e) => setDispatchQty(e.target.value)} />
+                                {/* ITEM DISPATCH SECTION (Form and List) */}
+                                <div className="space-y-4">
+                                    <div className="space-y-4 pt-4 border-t border-border">
+                                        <div className="space-y-1">
+                                            <Label>Item Name (Select from PO) *</Label>
+                                            <Select value={selectedLineItemId} onValueChange={handleItemChange}>
+                                                <SelectTrigger>
+                                                    <SelectValue placeholder={manualItem || "Select an item"} />
+                                                </SelectTrigger>
+                                                <SelectContent>
+                                                    {poData.line_items?.length > 0 ? (
+                                                        poData.line_items.map((li) => (
+                                                            <SelectItem key={li.id} value={li.id.toString()}>
+                                                                {li.item} ({getRealTimePending(li.id)} pending)
+                                                            </SelectItem>
+                                                        ))
+                                                    ) : (
+                                                        <SelectItem value="default">{poData.item} ({getRealTimePending("default")} pending)</SelectItem>
+                                                    )}
+                                                </SelectContent>
+                                            </Select>
+                                        </div>
+                                        <div className="grid grid-cols-3 gap-4">
+                                            <div className="space-y-1">
+                                                <Label>Rate (Rate)</Label>
+                                                <Input type="number" value={manualUnitPrice} onChange={e => setManualUnitPrice(e.target.value)} />
+                                            </div>
+                                            <div className="space-y-1">
+                                                <Label>GST %</Label>
+                                                <Input type="number" value={manualGstRate} onChange={e => setManualGstRate(e.target.value)} />
+                                            </div>
+                                            <div className="space-y-1">
+                                                <div className="flex justify-between items-center">
+                                                    <Label>Dispatch Quantity</Label>
+                                                    {selectedLineItemId && (
+                                                        <span className="text-[10px] font-medium text-amber-600 bg-amber-50 px-1.5 py-0.5 rounded border border-amber-100">
+                                                            Pending: {getRealTimePending(selectedLineItemId)}
+                                                        </span>
+                                                    )}
+                                                </div>
+                                                <Input type="number" value={dispatchQty} onChange={(e) => setDispatchQty(e.target.value)} />
+                                            </div>
+                                        </div>
+                                        <Button type="button" variant="outline" className="w-full border-dashed border-primary text-primary hover:bg-primary/5" onClick={addItemToDispatch}>
+                                            <Plus className="h-4 w-4 mr-2" /> Add Item to this Dispatch
+                                        </Button>
+                                    </div>
+
+                                    {dispatchItems.length > 0 && (
+                                        <div className="space-y-3 pt-4 border-t border-border">
+                                            <Label className="text-xs font-semibold text-primary uppercase">Items in this Dispatch</Label>
+                                            <div className="rounded-lg border border-border overflow-hidden">
+                                                <table className="w-full text-xs text-left">
+                                                    <thead className="bg-muted text-muted-foreground font-medium border-b border-border">
+                                                        <tr>
+                                                            <th className="p-2">Item Name</th>
+                                                            <th className="p-2 text-center">PO Pending</th>
+                                                            <th className="p-2 text-center">Dispatch Qty</th>
+                                                            <th className="p-2 text-right">Rate</th>
+                                                            <th className="p-2 text-right">GST</th>
+                                                            <th className="p-2 text-right">Total</th>
+                                                            <th className="p-2"></th>
+                                                        </tr>
+                                                    </thead>
+                                                    <tbody>
+                                                        {dispatchItems.map((item, idx) => (
+                                                            <tr key={idx} className="border-b border-border/50">
+                                                                <td className="p-2">
+                                                                    <div className="font-medium">{item.item}</div>
+                                                                </td>
+                                                                <td className="p-2 text-center text-muted-foreground">{item.po_pending} {item.uom}</td>
+                                                                <td className="p-2 text-center font-semibold text-primary">{item.quantity} {item.uom}</td>
+                                                                <td className="p-2 text-right">{inr(item.unit_price)}</td>
+                                                                <td className="p-2 text-right">{inr(item.gst_amount)} ({item.gst_rate}%)</td>
+                                                                <td className="p-2 text-right font-bold">{inr(item.total_amount)}</td>
+                                                                <td className="p-2">
+                                                                    <Button variant="ghost" size="sm" onClick={() => removeItemFromDispatch(idx)} className="h-6 w-6 p-0 text-destructive">
+                                                                        <X className="h-3 w-3" />
+                                                                    </Button>
+                                                                </td>
+                                                            </tr>
+                                                        ))}
+                                                    </tbody>
+                                                </table>
+                                                <div className="p-2 bg-primary/5 flex flex-wrap justify-between items-center text-[11px] gap-4">
+                                                    {(() => {
+                                                        const subtotal = dispatchItems.reduce((acc, i) => acc + i.subtotal, 0);
+                                                        const calculatedGstAmt = dispatchItems.reduce((acc, i) => acc + i.gst_amount, 0);
+                                                        const freight = Number(manualFreight) || 0;
+                                                        
+                                                        let finalGstAmt = calculatedGstAmt;
+                                                        if (manualTotalGstRate !== "") {
+                                                            finalGstAmt = Math.round(subtotal * (Number(manualTotalGstRate) / 100));
+                                                        }
+
+                                                        return (
+                                                            <>
+                                                                <div className="flex flex-wrap items-center gap-x-6 gap-y-2">
+                                                                    <span className="text-muted-foreground">Subtotal: <b className="text-foreground">{inr(subtotal)}</b></span>
+                                                                    <div className="flex items-center gap-2">
+                                                                        <span className="text-muted-foreground whitespace-nowrap">GST Rate (%):</span>
+                                                                        <Input 
+                                                                            type="number" 
+                                                                            className="h-7 w-14 text-[11px] py-0 px-2 text-center" 
+                                                                            placeholder="Rate"
+                                                                            value={manualTotalGstRate}
+                                                                            onChange={(e) => setManualTotalGstRate(e.target.value)}
+                                                                        />
+                                                                        {manualTotalGstRate !== "" && (
+                                                                            <span className="text-muted-foreground">({inr(finalGstAmt)})</span>
+                                                                        )}
+                                                                    </div>
+                                                                    <div className="flex items-center gap-2">
+                                                                        <span className="text-muted-foreground whitespace-nowrap">Freight:</span>
+                                                                        <Input 
+                                                                            type="number" 
+                                                                            className="h-7 w-20 text-[11px] py-0 px-2" 
+                                                                            placeholder="0"
+                                                                            value={manualFreight}
+                                                                            onChange={(e) => setManualFreight(e.target.value)}
+                                                                        />
+                                                                    </div>
+                                                                </div>
+                                                                <div className="font-bold text-primary text-sm">
+                                                                    Total Payable: {inr(subtotal + finalGstAmt + (Number(manualFreight) || 0))}
+                                                                </div>
+                                                            </>
+                                                        );
+                                                    })()}
+                                                </div>
+                                            </div>
+                                        </div>
+                                    )}
                                 </div>
 
                                 {/* HSN/SAC */}
-                                <div className="space-y-1">
+                                <div className="space-y-1 pt-2 border-t border-border">
                                     <Label>HSN/SAC</Label>
                                     <Input 
                                         placeholder="Enter HSN/SAC code" 
@@ -565,32 +812,6 @@ const SalesInvoice = () => {
                                         onChange={(e) => setHsnCode(e.target.value)}
                                     />
                                 </div>
-
-                                {poCalc && (
-                                    <div className="space-y-3">
-                                        <div className="rounded-lg bg-primary/5 border border-primary/20 p-3">
-                                            <div className="flex flex-wrap gap-x-6 gap-y-2 text-sm">
-                                                <div className="flex flex-col">
-                                                    <span className="text-[10px] uppercase text-muted-foreground">Total Delivered</span>
-                                                    <span className="font-bold text-foreground">{(Number(poData.delivered_quantity) || 0) + Number(dispatchQty)} {poData.uom || "Nos"}</span>
-                                                </div>
-                                                <div className="flex flex-col">
-                                                    <span className="text-[10px] uppercase text-muted-foreground">Remaining Pending</span>
-                                                    <span className="font-bold text-orange-600">{Math.max(0, pendingOnPO(poData) - Number(dispatchQty))} {poData.uom || "Nos"}</span>
-                                                </div>
-                                                <div className="flex flex-col border-l border-primary/20 pl-4">
-                                                    <span className="text-[10px] uppercase text-muted-foreground">Grand Total</span>
-                                                    <span className="font-bold text-primary">{inr(poCalc.grandTotal)}</span>
-                                                </div>
-                                            </div>
-                                            <div className="mt-2 pt-2 border-t border-primary/10 flex flex-wrap gap-x-4 text-[11px] text-muted-foreground">
-                                                <span>Subtotal: {inr(poCalc.subtotal)}</span>
-                                                <span>GST {poCalc.gstRate}%: {inr(poCalc.gstAmount)}</span>
-                                                <span>Freight: {inr(poCalc.freight)}</span>
-                                            </div>
-                                        </div>
-                                    </div>
-                                )}
 
                                 {/* Payment Status */}
                                 <div className="space-y-1 pt-2 border-t border-border">
@@ -620,13 +841,26 @@ const SalesInvoice = () => {
                         <div className="space-y-4 py-2">
                             {/* PO Context Info */}
                             <div className="rounded-lg border border-border bg-muted/30 p-4 space-y-3">
-                                <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">PO Information (Reference)</p>
-                                <div className="grid grid-cols-2 gap-3 text-sm">
-                                    <Field label="Client" value={editingSale.client_name} />
-                                    <Field label="Project" value={editingSale.project} />
-                                    <Field label="Item" value={editingSale.item} full />
-                                    <Field label="Total PO Qty" value={`${editingSale.total_qty} ${editingSale.uom}`} />
-                                    <Field label="Payment Terms (from PO)" value={editingSale.payment_terms} full />
+                                <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Sale Information (Editable)</p>
+                                <div className="space-y-4">
+                                    <div className="space-y-1">
+                                        <Label>Item(s) Dispatched</Label>
+                                        <Input value={editManualItem} readOnly className="bg-muted cursor-not-allowed" />
+                                    </div>
+                                    <div className="grid grid-cols-3 gap-4 text-sm">
+                                        <div className="space-y-1">
+                                            <Label>Base Rate</Label>
+                                            <Input type="number" value={editManualUnitPrice} readOnly className="bg-muted cursor-not-allowed" />
+                                        </div>
+                                        <div className="space-y-1">
+                                            <Label>GST %</Label>
+                                            <Input type="number" value={editManualGstRate} readOnly className="bg-muted cursor-not-allowed" />
+                                        </div>
+                                        <div className="space-y-1">
+                                            <Label>Total Freight</Label>
+                                            <Input type="number" value={editManualFreight} onChange={e => setEditManualFreight(e.target.value)} />
+                                        </div>
+                                    </div>
                                 </div>
                             </div>
 
@@ -718,8 +952,8 @@ const SalesInvoice = () => {
 
                             {/* Dispatch Quantity */}
                             <div className="space-y-1 pt-2 border-t border-border">
-                                <Label>Dispatch Quantity *</Label>
-                                <Input type="number" value={editDispatchQty} onChange={(e) => setEditDispatchQty(e.target.value)} />
+                                <Label>Total Dispatch Quantity</Label>
+                                <Input type="number" value={editDispatchQty} readOnly className="bg-muted cursor-not-allowed" />
                             </div>
 
                             {/* HSN/SAC */}
@@ -818,7 +1052,63 @@ const SalesInvoice = () => {
                                 <Field label="Bill To" value={viewSale.bill_to} full />
                                 <Field label="Dispatched Through" value={viewSale.dispatched_through} full />
                                 <Field label="e-Way Bill No." value={viewSale.e_way_bill_no} />
-                                <div className="col-span-1">
+                            </div>
+                            <div className="rounded-lg border border-border bg-muted/30 p-4 space-y-4">
+                                <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Item Details</p>
+                                <div className="rounded-md border border-border overflow-hidden">
+                                    <table className="w-full text-xs text-left">
+                                        <thead className="bg-muted text-muted-foreground font-medium border-b border-border">
+                                            <tr>
+                                                <th className="p-2">Item</th>
+                                                <th className="p-2 text-center">Qty</th>
+                                                <th className="p-2 text-right">Rate</th>
+                                                <th className="p-2 text-right">GST</th>
+                                                <th className="p-2 text-right">Total</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            {(viewSale.items || []).map((it, idx) => (
+                                                <tr key={idx} className="border-b border-border/50">
+                                                    <td className="p-2 font-medium">{it.item}</td>
+                                                    <td className="p-2 text-center">{it.quantity} {it.uom}</td>
+                                                    <td className="p-2 text-right">{inr(it.unit_price)}</td>
+                                                    <td className="p-2 text-right">{inr(it.gst_amount)} ({it.gst_rate}%)</td>
+                                                    <td className="p-2 text-right font-bold">{inr(it.total_amount)}</td>
+                                                </tr>
+                                            ))}
+                                        </tbody>
+                                        <tfoot className="bg-muted/50 font-semibold">
+                                            <tr>
+                                                <td colSpan="4" className="p-2 text-right">Subtotal:</td>
+                                                <td className="p-2 text-right">{inr(viewSale.subtotal)}</td>
+                                            </tr>
+                                            <tr>
+                                                <td colSpan="4" className="p-2 text-right">Total GST:</td>
+                                                <td className="p-2 text-right">{inr(viewSale.gst_amount)}</td>
+                                            </tr>
+                                            <tr>
+                                                <td colSpan="4" className="p-2 text-right">Freight:</td>
+                                                <td className="p-2 text-right">{inr(viewSale.freight)}</td>
+                                            </tr>
+                                            <tr className="text-primary bg-primary/5 text-sm">
+                                                <td colSpan="4" className="p-2 text-right">Grand Total:</td>
+                                                <td className="p-2 text-right">{inr(viewSale.grand_total)}</td>
+                                            </tr>
+                                        </tfoot>
+                                    </table>
+                                </div>
+                            </div>
+
+                            <div className="grid grid-cols-2 gap-4 text-sm">
+                                <div className="space-y-1">
+                                    <div className="text-[11px] uppercase tracking-wider text-muted-foreground">Invoice Doc</div>
+                                    {viewSale.invoice_url ? (
+                                        <Button type="button" variant="link" size="sm" className="p-0 h-auto text-primary" onClick={() => window.open(`http://localhost:8000${viewSale.invoice_url}`, "_blank")}>
+                                            View Invoice
+                                        </Button>
+                                    ) : <span className="text-xs text-muted-foreground">—</span>}
+                                </div>
+                                <div className="space-y-1">
                                     <div className="text-[11px] uppercase tracking-wider text-muted-foreground">e-Way Bill Doc</div>
                                     {viewSale.e_way_bill_url ? (
                                         <Button type="button" variant="link" size="sm" className="p-0 h-auto text-primary" onClick={() => window.open(`http://localhost:8000${viewSale.e_way_bill_url}`, "_blank")}>
@@ -885,7 +1175,7 @@ const SalesInvoice = () => {
                     {filteredSales.map((sale) => {
                         const po = orders.find((o) => o.id === sale.po_id);
                         const currentPending = po ? pendingOnPO(po) : 0;
-                        const totalDelivered = (sale.previous_delivered || 0) + sale.dispatched_qty;
+                        const totalDispatched = sale.items?.reduce((acc, it) => acc + it.quantity, 0) || 0;
                         return (
                             <Card key={sale.id} className="p-5 shadow-card space-y-4">
                                 <div className="flex flex-wrap items-center justify-between gap-2">
@@ -953,13 +1243,11 @@ const SalesInvoice = () => {
                                 </div>
 
                                 <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3 text-sm">
-                                    <Field label="Item" value={sale.item} />
+                                    <Field label="Items" value={sale.item} full />
                                     <Field label="Project" value={sale.project} />
-                                    <Field label="PO Total Qty" value={`${sale.total_qty} ${sale.uom}`} />
-                                    <Field label="Dispatched Qty" value={`${sale.dispatched_qty} ${sale.uom}`} />
-                                    <Field label="Pending Qty" value={`${currentPending} ${sale.uom}`} />
-                                    <Field label="Grand Total" value={inr(sale.grand_total)} />
-                                    <Field label="GST" value={`${sale.gst_rate}% (${inr(sale.gst_amount)})`} />
+                                    <Field label="Invoice Total" value={inr(sale.grand_total)} />
+                                    <Field label="Subtotal" value={inr(sale.subtotal)} />
+                                    <Field label="Total GST" value={inr(sale.gst_amount)} />
                                     <Field label="Freight" value={inr(sale.freight)} />
                                     <Field label="Dispatched Through" value={sale.dispatched_through} />
                                     <Field label="HSN/SAC" value={sale.hsn_code} />

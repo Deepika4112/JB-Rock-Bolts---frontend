@@ -53,7 +53,16 @@ const PurchaseOrders = () => {
 
     const createMutation = useMutation({ mutationFn: createPurchaseOrder, onSuccess: invalidate });
     const updateMutation = useMutation({ mutationFn: ({ id, body }) => updatePurchaseOrder(id, body), onSuccess: invalidate });
-    const deleteMutation = useMutation({ mutationFn: deletePurchaseOrder, onSuccess: invalidate });
+    const deleteMutation = useMutation({ 
+        mutationFn: deletePurchaseOrder, 
+        onSuccess: () => {
+            invalidate();
+            toast.success("Purchase Order deleted");
+        },
+        onError: (err) => {
+            toast.error(err.message || "Failed to delete Purchase Order");
+        }
+    });
     const markOpenedMutation = useMutation({ mutationFn: (id) => fetchPurchaseOrder(id, getCurrentUser()), onSuccess: invalidate });
 
     const clientMutation = useMutation({ mutationFn: createClient, onSuccess: () => qc.invalidateQueries({ queryKey: ["constants"] }) });
@@ -70,6 +79,7 @@ const PurchaseOrders = () => {
     const [addClientOpen, setAddClientOpen] = useState(false);
     const [addProjectOpen, setAddProjectOpen] = useState(false);
     const [newClientName, setNewClientName] = useState("");
+    const [newClientSalutation, setNewClientSalutation] = useState("M/s.");
     const [newClientLocation, setNewClientLocation] = useState("");
     const [newProjectName, setNewProjectName] = useState("");
 
@@ -78,8 +88,8 @@ const PurchaseOrders = () => {
         if (!s) return orders;
         return orders.filter(
             (o) =>
-                o.client_name.toLowerCase().includes(s) ||
-                o.po_number.toLowerCase().includes(s) ||
+                (o.client_name || "").toLowerCase().includes(s) ||
+                (o.po_number || "").toLowerCase().includes(s) ||
                 (o.item || "").toLowerCase().includes(s) ||
                 (o.project || "").toLowerCase().includes(s)
         );
@@ -128,10 +138,15 @@ const PurchaseOrders = () => {
     const handleCreateClient = async () => {
         if (!newClientName || !newClientLocation) return toast.error("Name and Location are required");
         try {
-            await clientMutation.mutateAsync({ name: newClientName, location: newClientLocation });
-            set("clientDropdown", newClientName);
+            const fullName = `${newClientSalutation} ${newClientName}`.trim();
+            await clientMutation.mutateAsync({ 
+                name: fullName, 
+                location: newClientLocation,
+            });
+            set("clientDropdown", fullName);
             setAddClientOpen(false);
             setNewClientName("");
+            setNewClientSalutation("M/s.");
             setNewClientLocation("");
             toast.success("Client added successfully");
         } catch (e) { toast.error(e.message); }
@@ -290,7 +305,21 @@ const PurchaseOrders = () => {
                                         <DialogContent className="sm:max-w-[425px]">
                                             <DialogHeader><DialogTitle>Add New Client</DialogTitle></DialogHeader>
                                             <div className="space-y-4 py-4">
-                                                <div className="space-y-2"><Label>Client Name</Label><Input value={newClientName} onChange={e => setNewClientName(e.target.value)} /></div>
+                                                <div className="space-y-2">
+                                                    <Label>Client Name</Label>
+                                                    <div className="flex gap-2">
+                                                        <Select value={newClientSalutation} onValueChange={setNewClientSalutation}>
+                                                            <SelectTrigger className="w-[80px]"><SelectValue /></SelectTrigger>
+                                                            <SelectContent>
+                                                                <SelectItem value="Mr.">Mr.</SelectItem>
+                                                                <SelectItem value="Mrs.">Mrs.</SelectItem>
+                                                                <SelectItem value="Ms.">Ms.</SelectItem>
+                                                                <SelectItem value="M/s.">M/s.</SelectItem>
+                                                            </SelectContent>
+                                                        </Select>
+                                                        <Input className="flex-1" placeholder="Enter name" value={newClientName} onChange={e => setNewClientName(e.target.value)} />
+                                                    </div>
+                                                </div>
                                                 <div className="space-y-2"><Label>Location</Label><Input value={newClientLocation} onChange={e => setNewClientLocation(e.target.value)} /></div>
                                             </div>
                                             <DialogFooter>
@@ -406,20 +435,7 @@ const PurchaseOrders = () => {
                                                 </div>
                                             </div>
 
-                                            <div className="mt-3 pt-3 border-t border-border/50 flex flex-wrap gap-x-4 gap-y-1 text-[11px]">
-                                                {(() => {
-                                                    const rowSubtotal = (Number(li.quantity) || 0) * (Number(li.unit_price) || 0);
-                                                    const rowGst = Math.round(rowSubtotal * gstPercent / 100);
-                                                    const rowTotal = rowSubtotal + rowGst;
-                                                    return (
-                                                        <>
-                                                            <span className="text-muted-foreground">Amount: <span className="font-semibold text-foreground">{inr(rowSubtotal)}</span></span>
-                                                            <span className="text-muted-foreground">GST ({gstPercent}%): <span className="font-semibold text-foreground">{inr(rowGst)}</span></span>
-                                                            <span className="text-muted-foreground">Row Total: <span className="font-semibold text-foreground text-primary">{inr(rowTotal)}</span></span>
-                                                        </>
-                                                    );
-                                                })()}
-                                            </div>
+
                                         </div>
                                     ))}
                                 </div>
@@ -469,14 +485,7 @@ const PurchaseOrders = () => {
                                 </div>
                             </div>
 
-                            <div className="sm:col-span-2 rounded-lg bg-muted/40 border border-border p-3 text-sm">
-                                <div className="flex flex-wrap gap-x-6 gap-y-1">
-                                    <span className="text-muted-foreground">Subtotal: <span className="font-semibold text-foreground">{inr(subtotal)}</span></span>
-                                    <span className="text-muted-foreground">GST {form.gst || 0}%: <span className="font-semibold text-foreground">{inr(gstAmount)}</span></span>
-                                    <span className="text-muted-foreground">Freight: <span className="font-semibold text-foreground">{inr(Number(form.freight) || 0)}</span></span>
-                                    <span className="text-muted-foreground">Grand Total: <span className="font-semibold text-foreground">{inr(grandTotal)}</span></span>
-                                </div>
-                            </div>
+
                         </div>
                         <DialogFooter>
                             <Button variant="outline" onClick={() => setDialogOpen(false)}>Cancel</Button>
@@ -525,7 +534,7 @@ const PurchaseOrders = () => {
             <Card className="shadow-card overflow-hidden">
                 <div className="overflow-x-auto">
                     <table className="w-full text-sm">
-                        <thead className="bg-muted/50 text-muted-foreground text-[10px] uppercase tracking-wider">
+                        <thead className="bg-muted/50 text-muted-foreground text-xs uppercase tracking-wider">
                             <tr>
                                 <th className="text-left font-semibold px-1.5 py-3">Client</th>
                                 <th className="text-left font-semibold px-1.5 py-3">Project</th>
@@ -534,7 +543,6 @@ const PurchaseOrders = () => {
                                 <th className="text-right font-semibold px-1.5 py-3">Qty</th>
                                 <th className="text-right font-semibold px-1.5 py-3">Del.</th>
                                 <th className="text-right font-semibold px-1.5 py-3">Pend.</th>
-                                <th className="text-right font-semibold px-1.5 py-3">Total</th>
                                 <th className="text-left font-semibold px-1.5 py-3">Validity</th>
                                 <th className="text-left font-semibold px-1.5 py-3">Status</th>
                                 <th className="text-left font-semibold px-1.5 py-3">Activity</th>
@@ -549,22 +557,21 @@ const PurchaseOrders = () => {
                                 const lastAct = o.last_opened_at || o.last_updated_at || o.created_at;
                                 const lastBy = o.last_opened_by || o.last_updated_by || o.created_by || "—";
                                 return (
-                                    <tr key={o.id} className="border-t border-border hover:bg-muted/30 text-[12px]">
+                                    <tr key={o.id} className="border-t border-border hover:bg-muted/30 text-sm">
                                         <td className="px-1.5 py-3 text-foreground font-semibold truncate max-w-[100px]" title={o.client_name}>{o.client_name}</td>
                                         <td className="px-1.5 py-3 text-muted-foreground truncate max-w-[80px]" title={o.project}>{o.project}</td>
                                         <td className="px-1.5 py-3 text-muted-foreground max-w-[120px] truncate" title={(o.line_items?.length > 0) ? o.line_items.map(l => l.item).join(", ") : o.item}>
                                             {(o.line_items?.length > 0) ? o.line_items[0].item : o.item}
-                                            {(o.line_items?.length > 1) && <span className="ml-1 text-[9px] bg-primary/10 text-primary px-1 py-0.5 rounded-full">+{o.line_items.length - 1}</span>}
+                                            {(o.line_items?.length > 1) && <span className="ml-1 text-[10px] bg-primary/10 text-primary px-1.5 py-0.5 rounded-full">+{o.line_items.length - 1}</span>}
                                         </td>
-                                        <td className="px-1.5 py-3 font-medium text-foreground whitespace-nowrap text-[11px]">{o.po_number}</td>
-                                        <td className="px-1.5 py-3 text-right font-semibold whitespace-nowrap">{o.total_quantity} <span className="text-[9px] font-normal text-muted-foreground">{o.uom || "Nos"}</span></td>
+                                        <td className="px-1.5 py-3 font-medium text-foreground whitespace-nowrap text-xs">{o.po_number}</td>
+                                        <td className="px-1.5 py-3 text-right font-semibold whitespace-nowrap">{o.total_quantity} <span className="text-[10px] font-normal text-muted-foreground">{o.uom || "Nos"}</span></td>
                                         <td className="px-1.5 py-3 text-right text-success font-bold">{o.delivered_quantity}</td>
                                         <td className="px-1.5 py-3 text-right text-warning font-bold">{o.pending_quantity}</td>
-                                        <td className="px-1.5 py-3 text-right font-bold whitespace-nowrap text-primary">{inr(o.grand_total)}</td>
-                                        <td className="px-1.5 py-3 text-muted-foreground whitespace-nowrap text-[10px]">{o.validity_date ? fmtDate(o.validity_date) : "—"}</td>
-                                        <td className="px-1.5 py-3 scale-75 origin-left -mr-4"><StatusBadge status={o.delivery_status} label={o.delivery_status} /></td>
+                                        <td className="px-1.5 py-3 text-muted-foreground whitespace-nowrap text-xs">{o.validity_date ? fmtDate(o.validity_date) : "—"}</td>
+                                        <td className="px-1.5 py-3 scale-90 origin-left -mr-4"><StatusBadge status={o.delivery_status} label={o.delivery_status} /></td>
                                         <td className="px-1.5 py-3">
-                                            <div className="text-[9px] leading-tight">
+                                            <div className="text-[11px] leading-tight">
                                                 <div className="font-bold text-foreground truncate max-w-[70px]">{lastBy}</div>
                                                 <div className="text-muted-foreground whitespace-nowrap">{lastAct ? fmtDate(lastAct) : "—"}</div>
                                             </div>
@@ -618,7 +625,7 @@ const PurchaseOrders = () => {
                                 <Field label="Validity Date" value={viewing.validity_date ? fmtDate(viewing.validity_date) : "—"} />
                                 <Field label="GST %" value={viewing.gst || "0%"} />
                                 <Field label="Freight" value={inr(viewing.freight)} />
-                                <Field label="Grand Total" value={inr(viewing.grand_total)} />
+
                                 {viewing.file_url && (
                                     <div className="col-span-2 mt-2">
                                         <Button variant="outline" size="sm" className="w-full" onClick={() => window.open(`http://localhost:8000${viewing.file_url}`, "_blank")}>
@@ -635,6 +642,8 @@ const PurchaseOrders = () => {
                                             <th className="text-left px-3 py-2 font-medium text-muted-foreground">#</th>
                                             <th className="text-left px-3 py-2 font-medium text-muted-foreground">Item</th>
                                             <th className="text-right px-3 py-2 font-medium text-muted-foreground">Qty</th>
+                                            <th className="text-right px-3 py-2 font-medium text-muted-foreground text-success">Del.</th>
+                                            <th className="text-right px-3 py-2 font-medium text-muted-foreground text-warning">Pend.</th>
                                             <th className="text-left px-3 py-2 font-medium text-muted-foreground">UOM</th>
                                             <th className="text-right px-3 py-2 font-medium text-muted-foreground">Unit Price</th>
                                             <th className="text-right px-3 py-2 font-medium text-muted-foreground">Amount</th>
@@ -646,6 +655,8 @@ const PurchaseOrders = () => {
                                                 <td className="px-3 py-2 text-muted-foreground">{i + 1}</td>
                                                 <td className="px-3 py-2 font-medium">{li.item}</td>
                                                 <td className="px-3 py-2 text-right">{li.quantity}</td>
+                                                <td className="px-3 py-2 text-right text-success font-bold">{li.delivered_quantity || 0}</td>
+                                                <td className="px-3 py-2 text-right text-warning font-bold">{Math.max(0, (li.quantity || 0) - (li.delivered_quantity || 0))}</td>
                                                 <td className="px-3 py-2">{li.uom || "Nos"}</td>
                                                 <td className="px-3 py-2 text-right">{inr(li.unit_price)}</td>
                                                 <td className="px-3 py-2 text-right font-semibold">{inr(li.quantity * li.unit_price)}</td>

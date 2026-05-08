@@ -135,15 +135,15 @@ const Reports = () => {
                     <Card className="shadow-card overflow-hidden">
                         <div className="overflow-x-auto">
                             <table className="w-full text-sm">
-                                <thead className="bg-muted/50 text-muted-foreground">
+                                <thead className="bg-muted/50 text-muted-foreground text-[11px] uppercase tracking-wider">
                                     <tr>
-                                        <th className="text-left font-medium px-5 py-4">Date</th>
-                                        <th className="text-left font-medium px-5 py-4">Client Name</th>
-                                        <th className="text-left font-medium px-5 py-4">Project Name</th>
-                                        <th className="text-left font-medium px-5 py-4">Item</th>
-                                        <th className="text-right font-medium px-5 py-4">Total Required</th>
-                                        <th className="text-right font-medium px-5 py-4">Delivered</th>
-                                        <th className="text-right font-medium px-5 py-4">Pending</th>
+                                        <th className="text-left font-semibold px-2 py-3">Date</th>
+                                        <th className="text-left font-semibold px-2 py-3">Client Name</th>
+                                        <th className="text-left font-semibold px-2 py-3">Project Name</th>
+                                        <th className="text-left font-semibold px-2 py-3">Item</th>
+                                        <th className="text-right font-semibold px-2 py-3">Req.</th>
+                                        <th className="text-right font-semibold px-2 py-3">Del.</th>
+                                        <th className="text-right font-semibold px-2 py-3">Pend.</th>
                                     </tr>
                                 </thead>
                                 <tbody>
@@ -151,14 +151,14 @@ const Reports = () => {
                                         <tr><td colSpan={6} className="px-5 py-12 text-center text-muted-foreground">Loading...</td></tr>
                                     )}
                                     {fulfillmentData?.rows.map((r) => (
-                                        <tr key={r.id} className="border-t border-border hover:bg-muted/30 transition-colors">
-                                            <td className="px-5 py-4 text-muted-foreground">{r.date}</td>
-                                            <td className="px-5 py-4 font-semibold text-foreground">{r.client_name}</td>
-                                            <td className="px-5 py-4 text-muted-foreground">{r.project}</td>
-                                            <td className="px-5 py-4 text-foreground font-medium">{r.item}</td>
-                                            <td className="px-5 py-4 text-right font-medium">{r.total_required} {r.uom}</td>
-                                            <td className="px-5 py-4 text-right font-bold text-success">{r.delivered} {r.uom}</td>
-                                            <td className="px-5 py-4 text-right font-bold text-orange-500">{r.pending} {r.uom}</td>
+                                        <tr key={r.id} className="border-t border-border hover:bg-muted/30 transition-colors text-[12.5px]">
+                                            <td className="px-2 py-3 text-muted-foreground whitespace-nowrap">{r.date}</td>
+                                            <td className="px-2 py-3 font-semibold text-foreground truncate max-w-[120px]" title={r.client_name}>{r.client_name}</td>
+                                            <td className="px-2 py-3 text-muted-foreground truncate max-w-[100px]" title={r.project}>{r.project}</td>
+                                            <td className="px-2 py-3 text-foreground font-medium truncate max-w-[140px]" title={r.item}>{r.item}</td>
+                                            <td className="px-2 py-3 text-right font-medium whitespace-nowrap">{r.total_required} <span className="text-[10px] text-muted-foreground">{r.uom}</span></td>
+                                            <td className="px-2 py-3 text-right font-bold text-success whitespace-nowrap">{r.delivered} <span className="text-[10px] text-muted-foreground">{r.uom}</span></td>
+                                            <td className="px-2 py-3 text-right font-bold text-orange-500 whitespace-nowrap">{r.pending} <span className="text-[10px] text-muted-foreground">{r.uom}</span></td>
                                         </tr>
                                     ))}
                                     {!fulfillmentLoading && fulfillmentData?.rows.length === 0 && (
@@ -220,13 +220,13 @@ const Reports = () => {
                     <Card className="shadow-card overflow-hidden">
                         <div className="overflow-x-auto">
                             <table className="w-full text-sm">
-                                <thead className="bg-muted/50 text-muted-foreground">
+                                <thead className="bg-muted/50 text-muted-foreground text-[11px] uppercase tracking-wider">
                                     <tr>
-                                        <th className="text-left font-medium px-5 py-4">Date</th>
-                                        <th className="text-left font-medium px-5 py-4">Invoice No</th>
-                                        <th className="text-left font-medium px-5 py-4">PO No</th>
-                                        <th className="text-right font-medium px-5 py-4">Grand Total</th>
-                                        <th className="text-left font-medium px-5 py-4">Payment</th>
+                                        <th className="text-left font-semibold px-2 py-3">Date</th>
+                                        <th className="text-left font-semibold px-2 py-3">Invoice No</th>
+                                        <th className="text-left font-semibold px-2 py-3">PO No</th>
+                                        <th className="text-right font-semibold px-2 py-3">Grand Total</th>
+                                        <th className="text-left font-semibold px-2 py-3">Payment</th>
                                     </tr>
                                 </thead>
                                 <tbody>
@@ -234,12 +234,12 @@ const Reports = () => {
                                         <tr><td colSpan={6} className="px-5 py-12 text-center text-muted-foreground">Loading...</td></tr>
                                     )}
                                     {salesData?.rows.map((r) => (
-                                        <tr key={r.id} className="border-t border-border hover:bg-muted/30 transition-colors">
-                                            <td className="px-5 py-4 text-muted-foreground">{r.date}</td>
-                                            <td className="px-5 py-4 text-primary font-medium">{r.invoice_number || "—"}</td>
-                                            <td className="px-5 py-4 text-muted-foreground">{r.po_number || "—"}</td>
-                                            <td className="px-5 py-4 text-right font-bold">{inr(r.price)}</td>
-                                            <td className="px-5 py-4 text-muted-foreground">{r.payment_status}</td>
+                                        <tr key={r.id} className="border-t border-border hover:bg-muted/30 transition-colors text-[12.5px]">
+                                            <td className="px-2 py-3 text-muted-foreground whitespace-nowrap">{r.date}</td>
+                                            <td className="px-2 py-3 text-primary font-medium truncate max-w-[120px]" title={r.invoice_number}>{r.invoice_number || "—"}</td>
+                                            <td className="px-2 py-3 text-muted-foreground truncate max-w-[120px]" title={r.po_number}>{r.po_number || "—"}</td>
+                                            <td className="px-2 py-3 text-right font-bold text-foreground">{inr(r.price)}</td>
+                                            <td className="px-2 py-3 text-muted-foreground text-[11px]">{r.payment_status}</td>
                                         </tr>
                                     ))}
                                     {!salesLoading && (!salesData || salesData.rows.length === 0) && (
