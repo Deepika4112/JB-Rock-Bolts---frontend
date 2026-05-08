@@ -84,6 +84,11 @@ const SalesInvoice = () => {
     const [editInvoiceUrl, setEditInvoiceUrl] = useState("");
     const [editPaymentStatus, setEditPaymentStatus] = useState("Pending");
 
+    // Mark Delivered dialog
+    const [markDeliveredOpen, setMarkDeliveredOpen] = useState(false);
+    const [markDeliveredTarget, setMarkDeliveredTarget] = useState(null);
+    const [deliveryChallanUrl, setDeliveryChallanUrl] = useState("");
+
     const pendingOnPO = (po) => Math.max(0, (Number(po.total_quantity) || 0) - (Number(po.delivered_quantity) || 0));
 
     const calcAmounts = (po, qty) => {
@@ -293,6 +298,69 @@ const SalesInvoice = () => {
         }
     };
 
+    const handleEwayBillUpload = async (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+        try {
+            const data = await uploadInvoiceFile(file);
+            setEwayBillUrl(data.file_url);
+            toast.success("E-Way Bill uploaded");
+        } catch (err) {
+            toast.error("Upload failed: " + err.message);
+        }
+    };
+
+    const handleEditEwayBillUpload = async (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+        try {
+            const data = await uploadInvoiceFile(file);
+            setEditEwayBillUrl(data.file_url);
+            toast.success("E-Way Bill uploaded");
+        } catch (err) {
+            toast.error("Upload failed: " + err.message);
+        }
+    };
+
+    const handleDeliveryChallanUpload = async (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+        try {
+            const data = await uploadInvoiceFile(file);
+            setDeliveryChallanUrl(data.file_url);
+            toast.success("Challan uploaded");
+        } catch (err) {
+            toast.error("Upload failed: " + err.message);
+        }
+    };
+
+    const handleMarkDelivered = async () => {
+        if (!markDeliveredTarget) return;
+        if (!deliveryChallanUrl) {
+            toast.error("Please upload a delivery challan document");
+            return;
+        }
+        try {
+            await updateMutation.mutateAsync({
+                id: markDeliveredTarget.id,
+                body: {
+                    delivery_status: "Delivered",
+                    delivery_challan_url: deliveryChallanUrl,
+                    updated_by: getCurrentUser()
+                }
+            });
+            await activityMutation.mutateAsync({
+                id: markDeliveredTarget.id,
+                body: { action: "Marked Delivered", note: "Sale marked as delivered with challan document.", payment_status: markDeliveredTarget.payment_status, by: getCurrentUser() },
+            });
+            toast.success("Sale marked as Delivered");
+            setMarkDeliveredOpen(false);
+            setMarkDeliveredTarget(null);
+        } catch (e) {
+            toast.error(e.message);
+        }
+    };
+
     const poCalc = useMemo(() => {
         if (!poData || !dispatchQty) return null;
         return calcAmounts(poData, Number(dispatchQty));
@@ -467,7 +535,7 @@ const SalesInvoice = () => {
                         )}
 
                         {poData && (
-                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2 border-t border-border">
                                 <div className="space-y-1">
                                     <Label>Payment Status</Label>
                                     <Select value={paymentStatus} onValueChange={setPaymentStatus}>
@@ -477,7 +545,7 @@ const SalesInvoice = () => {
                                         </SelectContent>
                                     </Select>
                                 </div>
-                                <div className="space-y-1 sm:col-span-2">
+                                <div className="space-y-1">
                                     <Label>Upload Invoice Document</Label>
                                     <div className="flex items-center gap-2">
                                         <Input type="file" className="hidden" id="invoice-file-upload" onChange={handleInvoiceUpload} accept=".pdf,.jpg,.jpeg,.png" />
@@ -568,7 +636,7 @@ const SalesInvoice = () => {
                             </div>
 
                             <div className="space-y-4 pt-2 border-t border-border">
-                                <div className="space-y-1">
+                                <div className="space-y-1 pt-2 border-t border-border">
                                     <Label>Dispatch From (Source Address)</Label>
                                     <Textarea value={editDispatchFrom} onChange={(e) => setEditDispatchFrom(e.target.value)} rows={2} />
                                 </div>
@@ -651,12 +719,21 @@ const SalesInvoice = () => {
                                 <Field label="Dispatched Qty" value={`${viewSale.dispatched_qty} ${viewSale.uom}`} />
                                 <Field label="Grand Total" value={inr(viewSale.grand_total)} />
                                 <Field label="Payment Status" value={viewSale.payment_status} />
+                                <Field label="Delivery Status" value={viewSale.delivery_status} />
                                 <Field label="Dispatch From" value={viewSale.dispatch_from} full />
                                 <Field label="Ship To" value={viewSale.ship_to} full />
                                 <Field label="Bill To" value={viewSale.bill_to} full />
                                 <Field label="Dispatched Through" value={viewSale.dispatched_through} full />
                                 <Field label="Buyer's Order No." value={viewSale.buyers_order_no} full />
                                 <Field label="Payment Terms" value={viewSale.payment_terms} full />
+                                {viewSale.delivery_challan_url && (
+                                    <div className="col-span-1">
+                                        <div className="text-[11px] uppercase tracking-wider text-muted-foreground">Delivery Challan</div>
+                                        <a href={`http://localhost:8000${viewSale.delivery_challan_url}`} target="_blank" rel="noreferrer" className="text-blue-500 hover:underline flex items-center gap-1 text-sm mt-0.5">
+                                            <FileText className="h-3 w-3" /> View Doc
+                                        </a>
+                                    </div>
+                                )}
                             </div>
                             <div className="rounded-lg border border-border bg-muted/30 p-4 space-y-3">
                                 <div className="flex items-center gap-2 text-sm font-semibold">
@@ -729,6 +806,10 @@ const SalesInvoice = () => {
                                             status={sale.payment_status === "Paid" ? "Delivered" : sale.payment_status === "Partial" ? "Partial" : "Pending"}
                                             label={sale.payment_status}
                                         />
+                                        <StatusBadge
+                                            status={sale.delivery_status === "Delivered" ? "Delivered" : "Pending"}
+                                            label={sale.delivery_status}
+                                        />
                                         <button onClick={() => setViewSale(sale)} title="View Activity"
                                             className="inline-flex items-center justify-center h-8 w-8 rounded-md hover:bg-muted transition-colors">
                                             <Eye className="h-4 w-4" />
@@ -755,6 +836,15 @@ const SalesInvoice = () => {
                                                 <UploadCloud className="h-4 w-4 text-orange-500" />
                                             )}
                                         </button>
+                                        {sale.delivery_challan_url && (
+                                            <button 
+                                                onClick={() => window.open(`http://localhost:8000${sale.delivery_challan_url}`, "_blank")} 
+                                                title="View Delivery Challan"
+                                                className="inline-flex items-center justify-center h-8 w-8 rounded-md hover:bg-muted transition-colors"
+                                            >
+                                                <FileText className="h-4 w-4 text-blue-500" />
+                                            </button>
+                                        )}
                                         <button onClick={() => setItemToDelete(sale.id)} title="Delete Sale"
                                             className="inline-flex items-center justify-center h-8 w-8 rounded-md hover:bg-destructive/10 text-destructive transition-colors">
                                             <Trash2 className="h-4 w-4" />
@@ -798,6 +888,15 @@ const SalesInvoice = () => {
                                     <Button size="sm" variant="outline" onClick={() => downloadInvoiceDocument(sale.id)}>
                                         <Download className="h-4 w-4 mr-1" /> Download Invoice
                                     </Button>
+                                    {sale.delivery_status !== "Delivered" && (
+                                        <Button size="sm" variant="outline" className="text-green-600 border-green-200 hover:bg-green-50" onClick={() => {
+                                            setMarkDeliveredTarget(sale);
+                                            setDeliveryChallanUrl("");
+                                            setMarkDeliveredOpen(true);
+                                        }}>
+                                            <Truck className="h-4 w-4 mr-1" /> Mark Delivered
+                                        </Button>
+                                    )}
                                     {PAYMENT_STATUS.filter((s) => s !== sale.payment_status).map((s) => (
                                         <Button key={s} size="sm" variant="outline" onClick={() => handlePaymentUpdate(sale.id, s)}>
                                             <CreditCard className="h-4 w-4 mr-1" /> Mark {s}
@@ -820,6 +919,35 @@ const SalesInvoice = () => {
                     <DialogFooter>
                         <Button variant="outline" onClick={() => setItemToDelete(null)}>Cancel</Button>
                         <Button variant="destructive" onClick={confirmDeleteSale} disabled={deleteMutation.isPending}>Delete</Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
+
+            {/* Mark Delivered Confirmation Dialog */}
+            <Dialog open={markDeliveredOpen} onOpenChange={(open) => !open && setMarkDeliveredOpen(false)}>
+                <DialogContent className="sm:max-w-md">
+                    <DialogHeader><DialogTitle>Mark as Delivered</DialogTitle></DialogHeader>
+                    <div className="space-y-4 py-4">
+                        <p className="text-sm text-muted-foreground">Upload the delivery challan document to mark this sale as Delivered.</p>
+                        <div className="space-y-2">
+                            <Label>Delivery Challan Document *</Label>
+                            <div className="flex items-center gap-2">
+                                <Input type="file" className="hidden" id="challan-file-upload" onChange={handleDeliveryChallanUpload} accept=".pdf,.jpg,.jpeg,.png" />
+                                <Button type="button" variant="outline" className="w-full" onClick={() => document.getElementById("challan-file-upload").click()}>
+                                    <FileText className="h-4 w-4 mr-2" />
+                                    {deliveryChallanUrl ? "Challan Uploaded ✓" : "Upload Challan"}
+                                </Button>
+                                {deliveryChallanUrl && (
+                                    <Button type="button" variant="ghost" size="icon" onClick={() => setDeliveryChallanUrl("")} title="Remove">
+                                        <X className="h-4 w-4 text-destructive" />
+                                    </Button>
+                                )}
+                            </div>
+                        </div>
+                    </div>
+                    <DialogFooter>
+                        <Button variant="outline" onClick={() => setMarkDeliveredOpen(false)}>Cancel</Button>
+                        <Button onClick={handleMarkDelivered} className="bg-gradient-primary" disabled={!deliveryChallanUrl || updateMutation.isPending}>Mark Delivered</Button>
                     </DialogFooter>
                 </DialogContent>
             </Dialog>

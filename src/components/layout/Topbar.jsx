@@ -4,6 +4,10 @@ import { Input } from "@/components/ui/input";
 import { useTheme } from "@/context/ThemeContext";
 import { getCurrentUser, setCurrentUser } from "@/lib/currentUser";
 import { useEffect, useState } from "react";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { fetchLogs } from "@/lib/api";
+import { useQuery } from "@tanstack/react-query";
+import { formatDistanceToNow } from "date-fns";
 
 export const Topbar = ({ onMenu }) => {
     const { theme, toggle } = useTheme();
@@ -12,6 +16,12 @@ export const Topbar = ({ onMenu }) => {
     useEffect(() => {
         setUser(getCurrentUser());
     }, []);
+
+    const { data: logs = [] } = useQuery({
+        queryKey: ["system_logs"],
+        queryFn: () => fetchLogs(20),
+        refetchInterval: 10000, // Refetch every 10 seconds
+    });
 
     const changeUser = () => {
         const next = window.prompt("Enter your name (used for activity log):", user);
@@ -55,10 +65,40 @@ export const Topbar = ({ onMenu }) => {
                     {theme === "dark" ? <Sun className="h-5 w-5" /> : <Moon className="h-5 w-5" />}
                 </Button>
 
-                <Button variant="ghost" size="icon" className="relative">
-                    <Bell className="h-5 w-5" />
-                    <span className="absolute top-2 right-2 h-2 w-2 rounded-full bg-accent" />
-                </Button>
+                <Popover>
+                    <PopoverTrigger asChild>
+                        <Button variant="ghost" size="icon" className="relative">
+                            <Bell className="h-5 w-5" />
+                            {logs.length > 0 && (
+                                <span className="absolute top-2 right-2 h-2 w-2 rounded-full bg-accent animate-pulse" />
+                            )}
+                        </Button>
+                    </PopoverTrigger>
+                    <PopoverContent className="w-80 p-0 mr-4 mt-2" align="end">
+                        <div className="flex items-center justify-between px-4 py-3 border-b border-border bg-muted/30">
+                            <h4 className="font-semibold text-sm">Notifications</h4>
+                            <span className="text-[10px] text-muted-foreground uppercase tracking-wider">{logs.length} Recent</span>
+                        </div>
+                        <div className="max-h-[400px] overflow-y-auto">
+                            {logs.length === 0 ? (
+                                <div className="p-4 text-center text-sm text-muted-foreground">No recent activities.</div>
+                            ) : (
+                                <div className="flex flex-col">
+                                    {logs.map((log) => (
+                                        <div key={log.id} className="flex flex-col gap-1 p-3 border-b border-border last:border-0 hover:bg-muted/50 transition-colors">
+                                            <div className="flex items-center justify-between">
+                                                <span className="text-xs font-semibold text-primary">{log.action}</span>
+                                                <span className="text-[10px] text-muted-foreground">{formatDistanceToNow(new Date(log.created_at), { addSuffix: true })}</span>
+                                            </div>
+                                            <p className="text-xs text-muted-foreground line-clamp-2">{log.details}</p>
+                                            <div className="text-[10px] text-muted-foreground mt-1">By: <span className="font-medium text-foreground">{log.user || 'System'}</span></div>
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
+                        </div>
+                    </PopoverContent>
+                </Popover>
 
                 <button
                     onClick={changeUser}

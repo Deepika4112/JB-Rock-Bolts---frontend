@@ -56,6 +56,7 @@ export const createSale = (body) => post("/api/sales", body);
 export const updateSale = (id, body) => put(`/api/sales/${id}`, body);
 export const deleteSale = (id) => del(`/api/sales/${id}`);
 export const addSaleActivity = (id, body) => post(`/api/sales/${id}/activities`, body);
+export const markSaleDelivered = (id, body) => put(`/api/sales/${id}/mark-delivered`, body);
 export const uploadInvoiceFile = async (file) => {
     const formData = new FormData();
     formData.append("file", file);
@@ -106,3 +107,6 @@ export const loginUser = (body) => post("/api/users/login", body);
 export const registerUser = (body) => post("/api/users/register", body);
 export const fetchUsers = () => get("/api/users");
 export const updateUser = (id, body) => put(`/api/users/${id}`, body);
+
+// ── Logs ─────────────────────────────────────────────────────────────────────
+export const fetchLogs = (limit = 50) => get("/api/logs", { limit });
