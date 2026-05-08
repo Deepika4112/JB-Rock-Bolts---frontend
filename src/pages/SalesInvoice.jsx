@@ -61,6 +61,7 @@ const SalesInvoice = () => {
     const [eWayBillNo, setEWayBillNo] = useState("");
     const [buyersOrderNo, setBuyersOrderNo] = useState("");
     const [paymentTerms, setPaymentTerms] = useState("");
+    const [hsnCode, setHsnCode] = useState("");
     const [uploadingSaleId, setUploadingSaleId] = useState(null);
 
     // Dispatch More dialog
@@ -87,6 +88,7 @@ const SalesInvoice = () => {
     const [editInvoiceUrl, setEditInvoiceUrl] = useState("");
     const [editEWayBillUrl, setEditEWayBillUrl] = useState("");
     const [editPaymentStatus, setEditPaymentStatus] = useState("Pending");
+    const [editHsnCode, setEditHsnCode] = useState("");
 
     const pendingOnPO = (po) => Math.max(0, (Number(po.total_quantity) || 0) - (Number(po.delivered_quantity) || 0));
 
@@ -115,6 +117,7 @@ const SalesInvoice = () => {
         setEWayBillNo("");
         setBuyersOrderNo("");
         setPaymentTerms(po?.payment_terms || "");
+        setHsnCode("");
     };
 
     const handleInvoiceUpload = async (e) => {
@@ -210,6 +213,7 @@ const SalesInvoice = () => {
                 e_way_bill_no: eWayBillNo || null,
                 buyers_order_no: buyersOrderNo || null,
                 payment_terms: paymentTerms || null,
+                hsn_code: hsnCode || null,
                 created_by: getCurrentUser(),
             });
             toast.success("Sale added & PO updated");
@@ -283,6 +287,7 @@ const SalesInvoice = () => {
         setEditBillTo(sale.bill_to || "");
         setEditPaymentTerms(sale.payment_terms || "");
         setEditPaymentNote(sale.payment_note || "");
+        setEditHsnCode(sale.hsn_code || "");
         setEditDispatchQty(sale.dispatched_qty.toString());
         setEditInvoiceUrl(sale.invoice_url || "");
         setEditEWayBillUrl(sale.e_way_bill_url || "");
@@ -309,6 +314,7 @@ const SalesInvoice = () => {
                     invoice_url: editInvoiceUrl || null,
                     e_way_bill_url: editEWayBillUrl || null,
                     payment_status: editPaymentStatus,
+                    hsn_code: editHsnCode || null,
                     updated_by: getCurrentUser(),
                 }
             });
@@ -550,6 +556,16 @@ const SalesInvoice = () => {
                                         value={dispatchQty} onChange={(e) => setDispatchQty(e.target.value)} />
                                 </div>
 
+                                {/* HSN/SAC */}
+                                <div className="space-y-1">
+                                    <Label>HSN/SAC</Label>
+                                    <Input 
+                                        placeholder="Enter HSN/SAC code" 
+                                        value={hsnCode} 
+                                        onChange={(e) => setHsnCode(e.target.value)}
+                                    />
+                                </div>
+
                                 {poCalc && (
                                     <div className="space-y-3">
                                         <div className="rounded-lg bg-primary/5 border border-primary/20 p-3">
@@ -706,6 +722,16 @@ const SalesInvoice = () => {
                                 <Input type="number" value={editDispatchQty} onChange={(e) => setEditDispatchQty(e.target.value)} />
                             </div>
 
+                            {/* HSN/SAC */}
+                            <div className="space-y-1">
+                                <Label>HSN/SAC</Label>
+                                <Input 
+                                    placeholder="Enter HSN/SAC code" 
+                                    value={editHsnCode} 
+                                    onChange={(e) => setEditHsnCode(e.target.value)}
+                                />
+                            </div>
+
                             {editPoCalc && (
                                 <div className="space-y-3">
                                     <div className="rounded-lg bg-primary/5 border border-primary/20 p-3">
@@ -801,6 +827,7 @@ const SalesInvoice = () => {
                                     ) : <span className="text-xs text-muted-foreground">—</span>}
                                 </div>
                                 <Field label="Buyer's Order No." value={viewSale.buyers_order_no} full />
+                                <Field label="HSN/SAC" value={viewSale.hsn_code} />
                                 <Field label="Payment Terms" value={viewSale.payment_terms} full />
                             </div>
                             <div className="rounded-lg border border-border bg-muted/30 p-4 space-y-3">
@@ -935,6 +962,7 @@ const SalesInvoice = () => {
                                     <Field label="GST" value={`${sale.gst_rate}% (${inr(sale.gst_amount)})`} />
                                     <Field label="Freight" value={inr(sale.freight)} />
                                     <Field label="Dispatched Through" value={sale.dispatched_through} />
+                                    <Field label="HSN/SAC" value={sale.hsn_code} />
                                     <Field label="Buyer's Order No." value={sale.buyers_order_no} />
                                 </div>
 

@@ -525,20 +525,20 @@ const PurchaseOrders = () => {
             <Card className="shadow-card overflow-hidden">
                 <div className="overflow-x-auto">
                     <table className="w-full text-sm">
-                        <thead className="bg-muted/50 text-muted-foreground">
+                        <thead className="bg-muted/50 text-muted-foreground text-[10px] uppercase tracking-wider">
                             <tr>
-                                <th className="text-left font-medium px-4 py-3">Client</th>
-                                <th className="text-left font-medium px-4 py-3">Project</th>
-                                <th className="text-left font-medium px-4 py-3">Item</th>
-                                <th className="text-left font-medium px-4 py-3">PO #</th>
-                                <th className="text-right font-medium px-4 py-3">Qty (UOM)</th>
-                                <th className="text-right font-medium px-4 py-3">Delivered</th>
-                                <th className="text-right font-medium px-4 py-3">Pending</th>
-                                <th className="text-right font-medium px-4 py-3">Grand Total</th>
-                                <th className="text-left font-medium px-4 py-3">Validity</th>
-                                <th className="text-left font-medium px-4 py-3">Status</th>
-                                <th className="text-left font-medium px-4 py-3">Last Activity</th>
-                                <th className="text-right font-medium px-4 py-3">Actions</th>
+                                <th className="text-left font-semibold px-1.5 py-3">Client</th>
+                                <th className="text-left font-semibold px-1.5 py-3">Project</th>
+                                <th className="text-left font-semibold px-1.5 py-3">Item</th>
+                                <th className="text-left font-semibold px-1.5 py-3">PO #</th>
+                                <th className="text-right font-semibold px-1.5 py-3">Qty</th>
+                                <th className="text-right font-semibold px-1.5 py-3">Del.</th>
+                                <th className="text-right font-semibold px-1.5 py-3">Pend.</th>
+                                <th className="text-right font-semibold px-1.5 py-3">Total</th>
+                                <th className="text-left font-semibold px-1.5 py-3">Validity</th>
+                                <th className="text-left font-semibold px-1.5 py-3">Status</th>
+                                <th className="text-left font-semibold px-1.5 py-3">Activity</th>
+                                <th className="text-right font-semibold px-1.5 py-3">Actions</th>
                             </tr>
                         </thead>
                         <tbody>
@@ -549,30 +549,30 @@ const PurchaseOrders = () => {
                                 const lastAct = o.last_opened_at || o.last_updated_at || o.created_at;
                                 const lastBy = o.last_opened_by || o.last_updated_by || o.created_by || "—";
                                 return (
-                                    <tr key={o.id} className="border-t border-border hover:bg-muted/30">
-                                        <td className="px-4 py-3 text-foreground">{o.client_name}</td>
-                                        <td className="px-4 py-3 text-muted-foreground">{o.project}</td>
-                                        <td className="px-4 py-3 text-muted-foreground max-w-[160px] truncate" title={(o.line_items?.length > 0) ? o.line_items.map(l => l.item).join(", ") : o.item}>
+                                    <tr key={o.id} className="border-t border-border hover:bg-muted/30 text-[12px]">
+                                        <td className="px-1.5 py-3 text-foreground font-semibold truncate max-w-[100px]" title={o.client_name}>{o.client_name}</td>
+                                        <td className="px-1.5 py-3 text-muted-foreground truncate max-w-[80px]" title={o.project}>{o.project}</td>
+                                        <td className="px-1.5 py-3 text-muted-foreground max-w-[120px] truncate" title={(o.line_items?.length > 0) ? o.line_items.map(l => l.item).join(", ") : o.item}>
                                             {(o.line_items?.length > 0) ? o.line_items[0].item : o.item}
-                                            {(o.line_items?.length > 1) && <span className="ml-1 text-[10px] bg-primary/10 text-primary px-1.5 py-0.5 rounded-full">+{o.line_items.length - 1}</span>}
+                                            {(o.line_items?.length > 1) && <span className="ml-1 text-[9px] bg-primary/10 text-primary px-1 py-0.5 rounded-full">+{o.line_items.length - 1}</span>}
                                         </td>
-                                        <td className="px-4 py-3 font-medium text-foreground">{o.po_number}</td>
-                                        <td className="px-4 py-3 text-right font-semibold">{o.total_quantity} <span className="text-xs font-normal text-muted-foreground">{o.uom || "Nos"}</span></td>
-                                        <td className="px-4 py-3 text-right text-success font-medium">{o.delivered_quantity}</td>
-                                        <td className="px-4 py-3 text-right text-warning font-medium">{o.pending_quantity}</td>
-                                        <td className="px-4 py-3 text-right font-semibold">{inr(o.grand_total)}</td>
-                                        <td className="px-4 py-3 text-muted-foreground whitespace-nowrap">{o.validity_date ? fmtDate(o.validity_date) : "—"}</td>
-                                        <td className="px-4 py-3"><StatusBadge status={o.delivery_status} label={o.delivery_status} /></td>
-                                        <td className="px-4 py-3">
-                                            <div className="text-xs">
-                                                <div className="font-medium text-foreground">{lastBy}</div>
-                                                <div className="text-muted-foreground">{lastAct ? fmtDateTime(lastAct) : "—"}</div>
+                                        <td className="px-1.5 py-3 font-medium text-foreground whitespace-nowrap text-[11px]">{o.po_number}</td>
+                                        <td className="px-1.5 py-3 text-right font-semibold whitespace-nowrap">{o.total_quantity} <span className="text-[9px] font-normal text-muted-foreground">{o.uom || "Nos"}</span></td>
+                                        <td className="px-1.5 py-3 text-right text-success font-bold">{o.delivered_quantity}</td>
+                                        <td className="px-1.5 py-3 text-right text-warning font-bold">{o.pending_quantity}</td>
+                                        <td className="px-1.5 py-3 text-right font-bold whitespace-nowrap text-primary">{inr(o.grand_total)}</td>
+                                        <td className="px-1.5 py-3 text-muted-foreground whitespace-nowrap text-[10px]">{o.validity_date ? fmtDate(o.validity_date) : "—"}</td>
+                                        <td className="px-1.5 py-3 scale-75 origin-left -mr-4"><StatusBadge status={o.delivery_status} label={o.delivery_status} /></td>
+                                        <td className="px-1.5 py-3">
+                                            <div className="text-[9px] leading-tight">
+                                                <div className="font-bold text-foreground truncate max-w-[70px]">{lastBy}</div>
+                                                <div className="text-muted-foreground whitespace-nowrap">{lastAct ? fmtDate(lastAct) : "—"}</div>
                                             </div>
                                         </td>
-                                        <td className="px-4 py-3 text-right">
-                                            <div className="flex gap-1 justify-end">
-                                                <Button size="icon" variant="ghost" onClick={() => setViewing(o)} title="View details"><Eye className="h-4 w-4" /></Button>
-                                                <Button size="icon" variant="ghost" 
+                                        <td className="px-1.5 py-3 text-right">
+                                            <div className="flex gap-0.5 justify-end">
+                                                <Button size="icon" variant="ghost" className="h-6 w-6" onClick={() => setViewing(o)} title="View details"><Eye className="h-3 w-3" /></Button>
+                                                <Button size="icon" variant="ghost" className="h-6 w-6"
                                                     onClick={() => {
                                                         if (o.file_url) {
                                                             window.open(`http://localhost:8000${o.file_url}`, "_blank");
@@ -584,14 +584,14 @@ const PurchaseOrders = () => {
                                                     title={o.file_url ? "View Uploaded PO" : "Upload PO Document"}
                                                 >
                                                     {o.file_url ? (
-                                                        <FileText className="h-4 w-4 text-green-500" />
+                                                        <FileText className="h-3 w-3 text-green-500" />
                                                     ) : (
-                                                        <UploadCloud className="h-4 w-4 text-red-500" />
+                                                        <UploadCloud className="h-3 w-3 text-red-500" />
                                                     )}
                                                 </Button>
-                                                <Button size="icon" variant="ghost" onClick={() => openPODocument(o.id)} title="Print PO"><Printer className="h-4 w-4" /></Button>
-                                                <Button size="icon" variant="ghost" onClick={() => openEdit(o)} title="Edit"><Pencil className="h-4 w-4" /></Button>
-                                                <Button size="icon" variant="ghost" onClick={() => setItemToDelete(o.id)} title="Delete"><Trash2 className="h-4 w-4 text-destructive" /></Button>
+                                                <Button size="icon" variant="ghost" className="h-6 w-6" onClick={() => openPODocument(o.id)} title="Print PO"><Printer className="h-3 w-3" /></Button>
+                                                <Button size="icon" variant="ghost" className="h-6 w-6" onClick={() => openEdit(o)} title="Edit"><Pencil className="h-3 w-3 text-blue-500" /></Button>
+                                                <Button size="icon" variant="ghost" className="h-6 w-6" onClick={() => setItemToDelete(o.id)} title="Delete"><Trash2 className="h-3 w-3 text-destructive" /></Button>
                                             </div>
                                         </td>
                                     </tr>
