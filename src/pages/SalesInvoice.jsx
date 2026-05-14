@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -6,23 +6,26 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { StatusBadge } from "@/components/StatusBadge";
 import { inr, fmtDate, fmtDateTime } from "@/lib/format";
 import { getCurrentUser } from "@/lib/currentUser";
+import { useConstants } from "@/lib/constants";
 import {
     fetchPurchaseOrders, fetchSales, createSale, updateSale,
     deleteSale as deleteSaleApi, addSaleActivity, openInvoiceDocument, downloadInvoiceDocument,
     uploadInvoiceFile
 } from "@/lib/api";
 import { toast } from "sonner";
-import { Plus, Truck, Clock, CreditCard, Eye, Package, User, Trash2, Search, Download, UploadCloud, FileText, X, Pencil, Receipt, CheckCircle } from "lucide-react";
+import { Plus, Truck, Clock, CreditCard, Eye, Package, User, Trash2, Search, Download, UploadCloud, FileText, X, Pencil, Receipt, CheckCircle, Printer, FileDown } from "lucide-react";
 
 const PAYMENT_STATUS = ["Pending", "Partial", "Paid"];
 
 const SalesInvoice = () => {
     const qc = useQueryClient();
+    const { uom_options } = useConstants();
 
     const { data: orders = [] } = useQuery({
         queryKey: ["purchase-orders"],
@@ -64,6 +67,7 @@ const SalesInvoice = () => {
     const [manualGstRate, setManualGstRate] = useState("");
     const [manualFreight, setManualFreight] = useState("");
     const [dispatchQty, setDispatchQty] = useState("");
+    const [manualUom, setManualUom] = useState("Nos");
     const [paymentStatus, setPaymentStatus] = useState("Pending");
     const [paymentNote, setPaymentNote] = useState("");
     const [invoiceUrl, setInvoiceUrl] = useState("");
@@ -80,18 +84,13 @@ const SalesInvoice = () => {
     const [uploadingSaleId, setUploadingSaleId] = useState(null);
     const [dispatchItems, setDispatchItems] = useState([]); // List of items for current dispatch
     const [manualTotalGstRate, setManualTotalGstRate] = useState(""); // Manual override for total GST %
-
-    // Dispatch More dialog
     const [dispatchOpen, setDispatchOpen] = useState(false);
     const [dispatchTarget, setDispatchTarget] = useState(null);
-    const [dispatchAdd, setDispatchAdd] = useState("");
-
     const [viewSale, setViewSale] = useState(null);
     const [itemToDelete, setItemToDelete] = useState(null);
     const [search, setSearch] = useState("");
     const [editOpen, setEditOpen] = useState(false);
     const [editingSale, setEditingSale] = useState(null);
-    // Edit form states
     const [editInvoiceNumber, setEditInvoiceNumber] = useState("");
     const [editDispatchedThrough, setEditDispatchedThrough] = useState("");
     const [editEWayBillNo, setEditEWayBillNo] = useState("");
@@ -101,14 +100,11 @@ const SalesInvoice = () => {
     const [editBillTo, setEditBillTo] = useState("");
     const [editPaymentTerms, setEditPaymentTerms] = useState("");
     const [editPaymentNote, setEditPaymentNote] = useState("");
-    const [editDispatchQty, setEditDispatchQty] = useState("");
     const [editInvoiceUrl, setEditInvoiceUrl] = useState("");
     const [editEWayBillUrl, setEditEWayBillUrl] = useState("");
     const [editPaymentStatus, setEditPaymentStatus] = useState("Pending");
-    const [editManualItem, setEditManualItem] = useState("");
-    const [editManualUnitPrice, setEditManualUnitPrice] = useState("");
-    const [editManualGstRate, setEditManualGstRate] = useState("");
     const [editManualFreight, setEditManualFreight] = useState("");
+    const [editManualTotalGstRate, setEditManualTotalGstRate] = useState("");
     const [editHsnCode, setEditHsnCode] = useState("");
 
     // Mark Delivered dialog
@@ -153,19 +149,35 @@ const SalesInvoice = () => {
         const po = orders.find((o) => o.po_number === poNumber);
         setPoData(po || null);
         setDispatchQty("");
+        setManualUom("Nos");
         setSelectedLineItemId("");
 
         const firstItem = po?.line_items?.[0];
-        if (po?.line_items?.length === 1 && firstItem) {
-            setSelectedLineItemId(firstItem.id.toString());
-            setManualItem(firstItem.item);
-            setManualUnitPrice(firstItem.unit_price.toString());
+        if (po?.line_items?.length > 0) {
+            if (po.line_items.length === 1 && firstItem) {
+                setSelectedLineItemId(firstItem.id.toString());
+                setManualItem(firstItem.item);
+                setManualUnitPrice(Number(firstItem.unit_price).toFixed(2));
+            } else {
+                setSelectedLineItemId("");
+                setManualItem("");
+                setManualUnitPrice("");
+            }
         } else {
+            setSelectedLineItemId("default");
             setManualItem(po?.item || "");
-            setManualUnitPrice(po?.unit_price?.toString() || "");
+            setManualUnitPrice(po?.unit_price ? Number(po.unit_price).toFixed(2) : "");
+            setManualUom(po?.uom || "Nos");
         }
 
-        setManualGstRate(parseFloat((po?.gst || "18").toString().replace("%", "")) || 18);
+        let parsedGst = 18;
+        if (po?.gst?.toString().startsWith("₹")) {
+            parsedGst = 0; // Fixed amount, so % is 0
+        } else {
+            const gstVal = parseFloat((po?.gst ?? "18").toString().replace("%", ""));
+            parsedGst = isNaN(gstVal) ? 18 : gstVal;
+        }
+        setManualGstRate(parsedGst);
         setManualFreight(po?.freight?.toString() || "0");
 
         setPaymentStatus("Pending");
@@ -187,31 +199,180 @@ const SalesInvoice = () => {
         const li = poData?.line_items?.find(x => x.id.toString() === liId);
         if (li) {
             setManualItem(li.item);
-            setManualUnitPrice(li.unit_price.toString());
+            setManualUnitPrice(Number(li.unit_price).toFixed(2));
+            setManualUom(li.uom || "Nos");
         }
     };
 
+    const handleRemoveFile = (type, urlToRemove) => {
+        if (type === "invoice") {
+            const current = invoiceUrl ? invoiceUrl.split(";") : [];
+            setInvoiceUrl(current.filter(u => u !== urlToRemove).join(";"));
+        } else if (type === "eway") {
+            const current = eWayBillUrl ? eWayBillUrl.split(";") : [];
+            setEWayBillUrl(current.filter(u => u !== urlToRemove).join(";"));
+        } else if (type === "edit-invoice") {
+            const current = editInvoiceUrl ? editInvoiceUrl.split(";") : [];
+            setEditInvoiceUrl(current.filter(u => u !== urlToRemove).join(";"));
+        } else if (type === "edit-eway") {
+            const current = editEWayBillUrl ? editEWayBillUrl.split(";") : [];
+            setEditEWayBillUrl(current.filter(u => u !== urlToRemove).join(";"));
+        } else if (type === "challan") {
+            const current = deliveryChallanUrl ? deliveryChallanUrl.split(";") : [];
+            setDeliveryChallanUrl(current.filter(u => u !== urlToRemove).join(";"));
+        }
+    };
+
+    const FileItem = ({ url, onRemove, type }) => {
+        const fileName = url.split("/").pop();
+        const ext = fileName.split(".").pop().toLowerCase();
+        const isPdf = ext === "pdf";
+        const fullUrl = `http://localhost:8000${url}`;
+
+        const handlePrint = () => {
+            const win = window.open(fullUrl, "_blank");
+            if (win) {
+                if (!isPdf) {
+                    win.onload = () => {
+                        win.print();
+                    };
+                } else {
+                    win.focus();
+                }
+            }
+        };
+
+        return (
+            <div className="flex items-center justify-between bg-muted/40 hover:bg-muted/60 transition-colors px-3 py-2 rounded-lg text-xs border border-border/50 group">
+                <div className="flex items-center gap-2 overflow-hidden mr-2">
+                    {isPdf ? (
+                        <FileText className="h-4 w-4 text-red-500 shrink-0" />
+                    ) : (
+                        <Eye className="h-4 w-4 text-blue-500 shrink-0" />
+                    )}
+                    <span className="truncate font-medium text-foreground/80">{fileName}</span>
+                </div>
+                <div className="flex items-center gap-1 shrink-0">
+                    <Tooltip>
+                        <TooltipTrigger asChild>
+                            <Button type="button" variant="ghost" size="sm" className="h-7 w-7 p-0 hover:bg-primary/10 text-primary" onClick={() => window.open(fullUrl, "_blank")}>
+                                <Eye className="h-3.5 w-3.5" />
+                            </Button>
+                        </TooltipTrigger>
+                        <TooltipContent>View Document</TooltipContent>
+                    </Tooltip>
+
+                    <Tooltip>
+                        <TooltipTrigger asChild>
+                            <Button type="button" variant="ghost" size="sm" className="h-7 w-7 p-0 hover:bg-amber-100 text-amber-600" onClick={handlePrint}>
+                                <Printer className="h-3.5 w-3.5" />
+                            </Button>
+                        </TooltipTrigger>
+                        <TooltipContent>Print Document</TooltipContent>
+                    </Tooltip>
+
+                    {onRemove && (
+                        <Tooltip>
+                            <TooltipTrigger asChild>
+                                <Button type="button" variant="ghost" size="sm" className="h-7 w-7 p-0 text-destructive hover:bg-destructive/10" onClick={onRemove}>
+                                    <X className="h-3.5 w-3.5" />
+                                </Button>
+                            </TooltipTrigger>
+                            <TooltipContent>Remove File</TooltipContent>
+                        </Tooltip>
+                    )}
+                </div>
+            </div>
+        );
+    };
+
+    const FilePopover = ({ urls, icon: Icon, label, saleId, onUploadClick }) => {
+        if (!urls) {
+            return (
+                <Tooltip>
+                    <TooltipTrigger asChild>
+                        <button
+                            onClick={onUploadClick}
+                            className="inline-flex items-center justify-center h-8 w-8 rounded-md hover:bg-muted transition-colors text-red-500 bg-red-50"
+                        >
+                            <UploadCloud className="h-4 w-4" />
+                        </button>
+                    </TooltipTrigger>
+                    <TooltipContent><p>Upload {label}</p></TooltipContent>
+                </Tooltip>
+            );
+        }
+
+        const urlList = urls.split(";").filter(Boolean);
+        const isChallan = label.toLowerCase().includes("challan");
+        
+        return (
+            <Popover>
+                <Tooltip>
+                    <TooltipTrigger asChild>
+                        <PopoverTrigger asChild>
+                            <button className={`inline-flex items-center justify-center h-8 w-8 rounded-md hover:bg-muted transition-colors relative ${isChallan ? "text-blue-500 bg-blue-50" : "text-green-500 bg-green-50"}`}>
+                                <Icon className="h-4 w-4" />
+                                {urlList.length > 1 && (
+                                    <span className={`absolute -top-1 -right-1 text-white text-[8px] font-bold h-3.5 w-3.5 rounded-full flex items-center justify-center shadow-sm border border-white ${isChallan ? "bg-blue-600" : "bg-green-600"}`}>
+                                        {urlList.length}
+                                    </span>
+                                )}
+                            </button>
+                        </PopoverTrigger>
+                    </TooltipTrigger>
+                    <TooltipContent><p>View {label} ({urlList.length})</p></TooltipContent>
+                </Tooltip>
+                <PopoverContent className="w-72 p-2 shadow-2xl border-border bg-card" align="end">
+                    <div className="space-y-2">
+                        <div className="text-[11px] font-bold uppercase text-muted-foreground px-2 py-1 border-b border-border/50 mb-1 flex justify-between items-center">
+                            <span>{label} Files</span>
+                            <span className="bg-muted px-1.5 py-0.5 rounded text-[10px] font-medium">{urlList.length}</span>
+                        </div>
+                        <div className="max-h-60 overflow-y-auto space-y-1.5 pr-1 custom-scrollbar">
+                            {urlList.map((url, i) => (
+                                <FileItem key={i} url={url} />
+                            ))}
+                        </div>
+                    </div>
+                </PopoverContent>
+            </Popover>
+        );
+    };
+
     const handleInvoiceUpload = async (e) => {
-        const file = e.target.files[0];
-        if (!file) return;
+        const files = Array.from(e.target.files);
+        if (files.length === 0) return;
+        const tid = toast.loading(`Uploading ${files.length} invoice(s)...`);
         try {
-            const data = await uploadInvoiceFile(file);
-            setInvoiceUrl(data.file_url);
-            toast.success("Invoice uploaded");
+            const urls = [];
+            for (const file of files) {
+                const data = await uploadInvoiceFile(file);
+                urls.push(data.file_url);
+            }
+            const current = invoiceUrl ? invoiceUrl.split(";") : [];
+            setInvoiceUrl([...current, ...urls].join(";"));
+            toast.success("Invoices uploaded", { id: tid });
         } catch (err) {
-            toast.error("Upload failed: " + err.message);
+            toast.error("Upload failed: " + err.message, { id: tid });
         }
     };
 
     const handleEWayBillUpload = async (e) => {
-        const file = e.target.files[0];
-        if (!file) return;
+        const files = Array.from(e.target.files);
+        if (files.length === 0) return;
+        const tid = toast.loading(`Uploading ${files.length} e-way bill(s)...`);
         try {
-            const data = await uploadInvoiceFile(file);
-            setEWayBillUrl(data.file_url);
-            toast.success("e-Way bill uploaded");
+            const urls = [];
+            for (const file of files) {
+                const data = await uploadInvoiceFile(file);
+                urls.push(data.file_url);
+            }
+            const current = eWayBillUrl ? eWayBillUrl.split(";") : [];
+            setEWayBillUrl([...current, ...urls].join(";"));
+            toast.success("e-Way bills uploaded", { id: tid });
         } catch (err) {
-            toast.error("Upload failed: " + err.message);
+            toast.error("Upload failed: " + err.message, { id: tid });
         }
     };
 
@@ -252,8 +413,8 @@ const SalesInvoice = () => {
 
 
     const addItemToDispatch = () => {
-        if (!manualItem || !dispatchQty || Number(dispatchQty) <= 0) {
-            toast.error("Please select an item and enter valid quantity");
+        if (!manualItem || !dispatchQty || Number(dispatchQty) <= 0 || !manualUom) {
+            toast.error("Please select an item, enter valid quantity and UOM");
             return;
         }
 
@@ -274,7 +435,7 @@ const SalesInvoice = () => {
         const newItem = {
             line_item_id: selectedLineItemId === "default" ? null : Number(selectedLineItemId),
             item: manualItem,
-            uom: li ? li.uom : (poData.uom || "Nos"),
+            uom: manualUom,
             quantity: Number(dispatchQty),
             po_pending: pending - Number(dispatchQty), // The NEW pending after this add
             unit_price: Number(manualUnitPrice),
@@ -303,11 +464,18 @@ const SalesInvoice = () => {
         if (dispatchItems.length === 0) { toast.error("Add at least one item"); return; }
 
         const subtotal = dispatchItems.reduce((acc, item) => acc + item.subtotal, 0);
-        const calculatedGstAmt = dispatchItems.reduce((acc, item) => acc + item.gst_amount, 0);
+        let gst_amount = dispatchItems.reduce((acc, item) => acc + item.gst_amount, 0);
 
-        let gst_amount = calculatedGstAmt;
         if (manualTotalGstRate !== "") {
             gst_amount = Math.round(subtotal * (Number(manualTotalGstRate) / 100));
+            // Distribute difference to last item
+            const currentSum = dispatchItems.reduce((acc, item) => acc + (Number(item.gst_amount) || 0), 0);
+            const diff = gst_amount - currentSum;
+            if (diff !== 0 && dispatchItems.length > 0) {
+                const lastIdx = dispatchItems.length - 1;
+                dispatchItems[lastIdx].gst_amount = (Number(dispatchItems[lastIdx].gst_amount) || 0) + diff;
+                dispatchItems[lastIdx].total_amount = (Number(dispatchItems[lastIdx].subtotal) || 0) + dispatchItems[lastIdx].gst_amount;
+            }
         }
 
         const freight = Number(manualFreight) || 0;
@@ -349,14 +517,133 @@ const SalesInvoice = () => {
         }
     };
 
-    const openDispatch = (sale) => { setDispatchTarget(sale); setDispatchAdd(""); setDispatchOpen(true); };
+    const openDispatch = (sale) => { 
+        handlePOChange(sale.po_number); 
+        setDispatchTarget(sale);
+        setDispatchItems([]);
+        setDispatchOpen(true); 
+    };
 
-    const handleDispatch = async () => {
-        // Since the system now supports multi-item sales, "Dispatch More" 
-        // should ideally add new items or create a new sale.
-        // For now, to avoid errors, we recommend creating a new Sale instead.
-        toast.info("Please create a new Sale entry for additional dispatches.");
-        setDispatchOpen(false);
+    const handleQuickDispatch = async () => {
+        if (!poData) { toast.error("Select a PO first"); return; }
+        if (dispatchItems.length === 0) { toast.error("Add at least one item"); return; }
+
+        if (dispatchTarget) {
+            // UPDATE EXISTING SALE
+            const combinedItems = [
+                ...(dispatchTarget.items || []),
+                ...dispatchItems.map(it => ({
+                    line_item_id: it.line_item_id,
+                    item: it.item,
+                    uom: it.uom,
+                    quantity: it.quantity,
+                    unit_price: it.unit_price,
+                    gst_rate: it.gst_rate,
+                    subtotal: it.subtotal,
+                    gst_amount: it.gst_amount,
+                    total_amount: it.total_amount
+                }))
+            ];
+
+            // Recalculate totals for perfect consistency
+            const subtotal = combinedItems.reduce((acc, item) => acc + (Number(item.subtotal) || 0), 0);
+            let gst_amount = combinedItems.reduce((acc, item) => acc + (Number(item.gst_amount) || 0), 0);
+
+            if (manualTotalGstRate !== "") {
+                gst_amount = Math.round(subtotal * (Number(manualTotalGstRate) / 100));
+                // Distribute difference to last item to maintain item-sum consistency
+                const currentSum = combinedItems.reduce((acc, item) => acc + (Number(item.gst_amount) || 0), 0);
+                const diff = gst_amount - currentSum;
+                if (diff !== 0 && combinedItems.length > 0) {
+                    const lastIdx = combinedItems.length - 1;
+                    combinedItems[lastIdx].gst_amount = (Number(combinedItems[lastIdx].gst_amount) || 0) + diff;
+                    combinedItems[lastIdx].total_amount = (Number(combinedItems[lastIdx].subtotal) || 0) + combinedItems[lastIdx].gst_amount;
+                }
+            }
+
+            const freight = Number(dispatchTarget.freight) || 0;
+            const grand_total = subtotal + gst_amount + freight;
+
+            try {
+                await updateMutation.mutateAsync({
+                    id: dispatchTarget.id,
+                    body: {
+                        items: combinedItems,
+                        subtotal,
+                        gst_amount,
+                        grand_total,
+                        updated_by: getCurrentUser()
+                    }
+                });
+
+                const itemsList = dispatchItems.map(i => `${i.quantity} ${i.uom} of ${i.item}`).join(", ");
+                await activityMutation.mutateAsync({
+                    id: dispatchTarget.id,
+                    body: {
+                        action: "Items Dispatched",
+                        note: `Dispatched more items: ${itemsList}`,
+                        payment_status: dispatchTarget.payment_status,
+                        by: getCurrentUser()
+                    },
+                });
+
+                toast.success("Items added to existing dispatch");
+                setDispatchOpen(false);
+                setSelectedPO("");
+                setPoData(null);
+                setDispatchItems([]);
+                setDispatchTarget(null);
+            } catch (e) {
+                toast.error(e.message);
+            }
+        } else {
+            // CREATE NEW SALE
+            const subtotal = dispatchItems.reduce((acc, item) => acc + item.subtotal, 0);
+            const calculatedGstAmt = dispatchItems.reduce((acc, item) => acc + item.gst_amount, 0);
+
+            let gst_amount = calculatedGstAmt;
+            if (manualTotalGstRate !== "") {
+                gst_amount = Math.round(subtotal * (Number(manualTotalGstRate) / 100));
+            }
+
+            const grand_total = subtotal + gst_amount;
+
+            try {
+                await createMutation.mutateAsync({
+                    po_id: poData.id,
+                    po_number: poData.po_number,
+                    client_name: poData.client_name,
+                    project: poData.project,
+                    items: dispatchItems,
+                    subtotal,
+                    gst_amount,
+                    freight: 0,
+                    grand_total,
+                    payment_status: "Pending",
+                    payment_note: null,
+                    invoice_url: null,
+                    e_way_bill_url: null,
+                    invoice_number: null,
+                    dispatch_from: dispatchFrom || null,
+                    ship_to: poData.location || null,
+                    bill_to: null,
+                    dispatched_through: null,
+                    e_way_bill_no: null,
+                    buyers_order_no: null,
+                    payment_terms: poData.payment_terms || null,
+                    hsn_code: null,
+                    created_by: getCurrentUser(),
+                });
+                toast.success("Quick Dispatch created");
+                setDispatchOpen(false);
+                setSelectedPO("");
+                setPoData(null);
+                setDispatchItems([]);
+                setDispatchTarget(null);
+            } catch (e) {
+                toast.error(e.message);
+            }
+        }
     };
 
     const handlePaymentUpdate = async (saleId, status) => {
@@ -383,40 +670,118 @@ const SalesInvoice = () => {
         setItemToDelete(null);
     };
 
+    const [editItems, setEditItems] = useState([]);
+    const [editSubtotal, setEditSubtotal] = useState(0);
+    const [editGstAmount, setEditGstAmount] = useState(0);
+    const [editGrandTotal, setEditGrandTotal] = useState(0);
+
     const openEditSale = (sale) => {
         setEditingSale(sale);
-        const firstItem = sale.items?.[0] || {};
-        setEditManualItem(firstItem.item || "");
-        setEditManualUnitPrice(firstItem.unit_price?.toString() || "");
-        setEditManualGstRate(firstItem.gst_rate?.toString() || "");
-        setEditManualFreight(sale.freight?.toString() || "");
         setEditInvoiceNumber(sale.invoice_number || "");
-        setEditDispatchedThrough(sale.dispatched_through || "");
         setEditEWayBillNo(sale.e_way_bill_no || "");
         setEditBuyersOrderNo(sale.buyers_order_no || "");
+        setEditDispatchedThrough(sale.dispatched_through || "");
         setEditDispatchFrom(sale.dispatch_from || "");
         setEditShipTo(sale.ship_to || "");
         setEditBillTo(sale.bill_to || "");
         setEditPaymentTerms(sale.payment_terms || "");
         setEditPaymentNote(sale.payment_note || "");
-        setEditHsnCode(sale.hsn_code || "");
-
-        const totalQty = sale.items?.reduce((acc, i) => acc + (Number(i.quantity) || 0), 0) || 0;
-        setEditDispatchQty(totalQty.toString());
-
+        setEditPaymentStatus(sale.payment_status);
         setEditInvoiceUrl(sale.invoice_url || "");
         setEditEWayBillUrl(sale.e_way_bill_url || "");
-        setEditPaymentStatus(sale.payment_status);
+        setEditHsnCode(sale.hsn_code || "");
+        setEditManualFreight(sale.freight?.toString() || "0");
+        setEditManualTotalGstRate("");
+        
+        // Load and recalculate all items to ensure UI consistency
+        const items = (sale.items || []).map(it => {
+            const q = Number(it.quantity) || 0;
+            const p = Number(it.unit_price) || 0;
+            const g = Number(it.gst_rate) || 0;
+            const sub = q * p;
+            const gst = Math.round(sub * g / 100);
+            return { 
+                ...it, 
+                subtotal: sub,
+                gst_amount: gst,
+                total_amount: sub + gst
+            };
+        });
+        setEditItems(items);
         setEditOpen(true);
     };
+
+    const updateEditItem = (idx, field, val) => {
+        const newItems = [...editItems];
+        const item = { ...newItems[idx], [field]: val };
+        
+        // Recalculate this item
+        const q = Number(item.quantity) || 0;
+        const p = Number(item.unit_price) || 0;
+        const g = Number(item.gst_rate) || 0;
+        
+        item.subtotal = q * p;
+        item.gst_amount = Math.round(item.subtotal * g / 100);
+        item.total_amount = item.subtotal + item.gst_amount;
+        
+        newItems[idx] = item;
+        setEditItems(newItems);
+    };
+
+    useEffect(() => {
+        const sub = editItems.reduce((acc, i) => acc + (Number(i.subtotal) || 0), 0);
+        const itemGst = editItems.reduce((acc, i) => acc + (Number(i.gst_amount) || 0), 0);
+        const fr = Number(editManualFreight) || 0;
+        
+        let finalGst = itemGst;
+        if (editManualTotalGstRate !== "") {
+            finalGst = Math.round(sub * (Number(editManualTotalGstRate) / 100));
+        }
+
+        setEditSubtotal(sub);
+        setEditGstAmount(finalGst);
+        setEditGrandTotal(sub + finalGst + fr);
+    }, [editItems, editManualFreight, editManualTotalGstRate]);
 
     const handleUpdateSale = async () => {
         if (!editingSale) return;
         try {
             await updateMutation.mutateAsync({
-                id: editingSale.id,
+                id: Number(editingSale.id),
                 body: {
                     freight: Number(editManualFreight),
+                    subtotal: editSubtotal,
+                    gst_amount: editGstAmount,
+                    grand_total: editGrandTotal,
+                    items: (() => {
+                        const items = [...editItems];
+                        if (editManualTotalGstRate !== "") {
+                            const currentSum = items.reduce((acc, it) => acc + (Number(it.gst_amount) || 0), 0);
+                            const diff = editGstAmount - currentSum;
+                            if (diff !== 0 && items.length > 0) {
+                                const last = items.length - 1;
+                                items[last] = {
+                                    ...items[last],
+                                    gst_amount: (Number(items[last].gst_amount) || 0) + diff,
+                                    total_amount: (Number(items[last].subtotal) || 0) + (Number(items[last].gst_amount) || 0) + diff
+                                };
+                            }
+                        }
+                        return items.map(it => {
+                            const liId = parseInt(it.line_item_id);
+                            return {
+                                line_item_id: isNaN(liId) ? null : liId,
+                                item: it.item || "Unknown Item",
+                                uom: it.uom || "Nos",
+                                quantity: parseFloat(it.quantity) || 0,
+                                unit_price: parseFloat(it.unit_price) || 0,
+                                gst_rate: parseFloat(it.gst_rate) || 0,
+                                subtotal: parseFloat(it.subtotal) || 0,
+                                gst_amount: parseFloat(it.gst_amount) || 0,
+                                total_amount: parseFloat(it.total_amount) || 0
+                            };
+                        });
+                    })(),
                     invoice_number: editInvoiceNumber || null,
                     dispatched_through: editDispatchedThrough || null,
                     e_way_bill_no: editEWayBillNo || null,
@@ -446,38 +811,56 @@ const SalesInvoice = () => {
     };
 
     const handleEditInvoiceUpload = async (e) => {
-        const file = e.target.files[0];
-        if (!file) return;
+        const files = Array.from(e.target.files);
+        if (files.length === 0) return;
+        const tid = toast.loading(`Uploading ${files.length} invoice(s)...`);
         try {
-            const data = await uploadInvoiceFile(file);
-            setEditInvoiceUrl(data.file_url);
-            toast.success("Invoice uploaded");
+            const urls = [];
+            for (const file of files) {
+                const data = await uploadInvoiceFile(file);
+                urls.push(data.file_url);
+            }
+            const current = editInvoiceUrl ? editInvoiceUrl.split(";") : [];
+            setEditInvoiceUrl([...current, ...urls].join(";"));
+            toast.success("Invoices updated", { id: tid });
         } catch (err) {
-            toast.error("Upload failed: " + err.message);
+            toast.error("Upload failed: " + err.message, { id: tid });
         }
     };
 
     const handleEditEWayBillUpload = async (e) => {
-        const file = e.target.files[0];
-        if (!file) return;
+        const files = Array.from(e.target.files);
+        if (files.length === 0) return;
+        const tid = toast.loading(`Uploading ${files.length} e-way bill(s)...`);
         try {
-            const data = await uploadInvoiceFile(file);
-            setEditEWayBillUrl(data.file_url);
-            toast.success("e-Way bill uploaded");
+            const urls = [];
+            for (const file of files) {
+                const data = await uploadInvoiceFile(file);
+                urls.push(data.file_url);
+            }
+            const current = editEWayBillUrl ? editEWayBillUrl.split(";") : [];
+            setEditEWayBillUrl([...current, ...urls].join(";"));
+            toast.success("e-Way bills updated", { id: tid });
         } catch (err) {
-            toast.error("Upload failed: " + err.message);
+            toast.error("Upload failed: " + err.message, { id: tid });
         }
     };
 
     const handleDeliveryChallanUpload = async (e) => {
-        const file = e.target.files[0];
-        if (!file) return;
+        const files = Array.from(e.target.files);
+        if (files.length === 0) return;
+        const tid = toast.loading(`Uploading ${files.length} challan(s)...`);
         try {
-            const data = await uploadInvoiceFile(file);
-            setDeliveryChallanUrl(data.file_url);
-            toast.success("Challan uploaded");
+            const urls = [];
+            for (const file of files) {
+                const data = await uploadInvoiceFile(file);
+                urls.push(data.file_url);
+            }
+            const current = deliveryChallanUrl ? deliveryChallanUrl.split(";") : [];
+            setDeliveryChallanUrl([...current, ...urls].join(";"));
+            toast.success("Challans uploaded", { id: tid });
         } catch (err) {
-            toast.error("Upload failed: " + err.message);
+            toast.error("Upload failed: " + err.message, { id: tid });
         }
     };
 
@@ -517,14 +900,7 @@ const SalesInvoice = () => {
         }, Number(dispatchQty));
     }, [poData, dispatchQty, manualUnitPrice, manualGstRate, manualFreight]);
 
-    const editPoCalc = useMemo(() => {
-        if (!editingSale || !editDispatchQty) return null;
-        return calcAmounts({
-            unit_price: editManualUnitPrice,
-            gst: editManualGstRate,
-            freight: editManualFreight
-        }, Number(editDispatchQty));
-    }, [editingSale, editDispatchQty, editManualUnitPrice, editManualGstRate, editManualFreight]);
+
 
     const filteredSales = useMemo(() => {
         if (!search.trim()) return sales;
@@ -566,7 +942,9 @@ const SalesInvoice = () => {
                                                 {o.po_number} — {o.client_name}
                                             </SelectItem>
                                         ))
-                                        : <div className="p-2 text-sm text-muted-foreground">No POs available</div>
+                                        : <div className="p-2 text-sm text-muted-foreground">
+                                            {qc.isFetching({ queryKey: ["purchase-orders"] }) ? "Loading Purchase Orders..." : "No POs available"}
+                                          </div>
                                     }
                                 </SelectContent>
                             </Select>
@@ -607,21 +985,18 @@ const SalesInvoice = () => {
                                         />
                                     </div>
                                     <div className="space-y-1">
-                                        <Label>Upload Invoice Document</Label>
-                                        <div className="flex items-center gap-2">
-                                            <Input type="file" className="hidden" id="invoice-file-upload" onChange={handleInvoiceUpload} accept=".pdf,.jpg,.jpeg,.png" />
-                                            <Button type="button" variant="outline" className="w-full" onClick={() => document.getElementById("invoice-file-upload").click()}>
+                                        <Label>Upload Invoice Document(s) {invoiceUrl && <span className="ml-1 text-primary">({invoiceUrl.split(";").filter(Boolean).length})</span>}</Label>
+                                        <div className="space-y-2">
+                                            <Input type="file" multiple className="hidden" id="invoice-file-upload" onChange={handleInvoiceUpload} accept=".pdf,.jpg,.jpeg,.png" />
+                                            <Button type="button" variant="outline" className="w-full border-slate-900 text-slate-900 hover:bg-slate-50" onClick={() => document.getElementById("invoice-file-upload").click()}>
                                                 <FileText className={`h-4 w-4 mr-2 ${invoiceUrl ? "text-green-500" : "text-red-500"}`} />
-                                                {invoiceUrl ? "Invoice Uploaded ✓" : "Upload Invoice"}
+                                                {invoiceUrl ? `${invoiceUrl.split(";").length} File(s) Uploaded` : "Upload Invoice(s)"}
                                             </Button>
                                             {invoiceUrl && (
-                                                <div className="flex items-center gap-2">
-                                                    <Button type="button" variant="ghost" size="sm" onClick={() => setInvoiceUrl("")} className="text-destructive hover:bg-destructive/10">
-                                                        <Trash2 className="h-4 w-4 mr-2" />
-                                                    </Button>
-                                                    <Button type="button" variant="link" size="sm" className="text-primary text-xs" onClick={() => window.open(`http://localhost:8000${invoiceUrl}`, "_blank")}>
-                                                        View
-                                                    </Button>
+                                                <div className="grid grid-cols-1 gap-2 mt-2">
+                                                    {invoiceUrl.split(";").map((url, i) => (
+                                                        <FileItem key={i} url={url} onRemove={() => handleRemoveFile("invoice", url)} />
+                                                    ))}
                                                 </div>
                                             )}
                                         </div>
@@ -639,21 +1014,18 @@ const SalesInvoice = () => {
                                         />
                                     </div>
                                     <div className="space-y-1">
-                                        <Label>Upload e-Way Bill Document</Label>
-                                        <div className="flex items-center gap-2">
-                                            <Input type="file" className="hidden" id="eway-file-upload" onChange={handleEWayBillUpload} accept=".pdf,.jpg,.jpeg,.png" />
-                                            <Button type="button" variant="outline" className="w-full" onClick={() => document.getElementById("eway-file-upload").click()}>
+                                        <Label>Upload e-Way Bill Document(s) {eWayBillUrl && <span className="ml-1 text-primary">({eWayBillUrl.split(";").filter(Boolean).length})</span>}</Label>
+                                        <div className="space-y-2">
+                                            <Input type="file" multiple className="hidden" id="eway-file-upload" onChange={handleEWayBillUpload} accept=".pdf,.jpg,.jpeg,.png" />
+                                            <Button type="button" variant="outline" className="w-full border-slate-900 text-slate-900 hover:bg-slate-50" onClick={() => document.getElementById("eway-file-upload").click()}>
                                                 <Receipt className={`h-4 w-4 mr-2 ${eWayBillUrl ? "text-green-500" : "text-red-500"}`} />
-                                                {eWayBillUrl ? "e-Way Bill Uploaded ✓" : "Upload e-Way Bill"}
+                                                {eWayBillUrl ? `${eWayBillUrl.split(";").length} File(s) Uploaded` : "Upload e-Way Bill(s)"}
                                             </Button>
                                             {eWayBillUrl && (
-                                                <div className="flex items-center gap-2">
-                                                    <Button type="button" variant="ghost" size="sm" onClick={() => setEWayBillUrl("")} className="text-destructive hover:bg-destructive/10">
-                                                        <Trash2 className="h-4 w-4 mr-2" />
-                                                    </Button>
-                                                    <Button type="button" variant="link" size="sm" className="text-primary text-xs" onClick={() => window.open(`http://localhost:8000${eWayBillUrl}`, "_blank")}>
-                                                        View
-                                                    </Button>
+                                                <div className="grid grid-cols-1 gap-2 mt-2">
+                                                    {eWayBillUrl.split(";").map((url, i) => (
+                                                        <FileItem key={i} url={url} onRemove={() => handleRemoveFile("eway", url)} />
+                                                    ))}
                                                 </div>
                                             )}
                                         </div>
@@ -736,7 +1108,7 @@ const SalesInvoice = () => {
                                                 </SelectContent>
                                             </Select>
                                         </div>
-                                        <div className="grid grid-cols-3 gap-4">
+                                        <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
                                             <div className="space-y-1">
                                                 <Label>Rate (Rate)</Label>
                                                 <Input type="number" value={manualUnitPrice} onChange={e => setManualUnitPrice(e.target.value)} />
@@ -746,15 +1118,33 @@ const SalesInvoice = () => {
                                                 <Input type="number" value={manualGstRate} onChange={e => setManualGstRate(e.target.value)} />
                                             </div>
                                             <div className="space-y-1">
+                                                <Label>UOM</Label>
+                                                <Select value={manualUom} onValueChange={setManualUom}>
+                                                    <SelectTrigger className="h-10">
+                                                        <SelectValue placeholder="UOM" />
+                                                    </SelectTrigger>
+                                                    <SelectContent>
+                                                        {uom_options.map((u) => (
+                                                            <SelectItem key={u} value={u}>{u}</SelectItem>
+                                                        ))}
+                                                    </SelectContent>
+                                                </Select>
+                                            </div>
+                                            <div className="space-y-1">
                                                 <div className="flex justify-between items-center">
-                                                    <Label>Dispatch Quantity</Label>
+                                                    <Label>Qty</Label>
                                                     {selectedLineItemId && (
                                                         <span className="text-[10px] font-medium text-amber-600 bg-amber-50 px-1.5 py-0.5 rounded border border-amber-100">
                                                             Pending: {getRealTimePending(selectedLineItemId)}
                                                         </span>
                                                     )}
                                                 </div>
-                                                <Input type="number" value={dispatchQty} onChange={(e) => setDispatchQty(e.target.value)} />
+                                                <Input 
+                                                    type="number" 
+                                                    placeholder={selectedLineItemId ? `Max: ${getRealTimePending(selectedLineItemId)}` : ""}
+                                                    value={dispatchQty} 
+                                                    onChange={(e) => setDispatchQty(e.target.value)} 
+                                                />
                                             </div>
                                         </div>
                                         <Button type="button" variant="outline" className="w-full border-dashed border-primary text-primary hover:bg-primary/5" onClick={addItemToDispatch}>
@@ -883,33 +1273,86 @@ const SalesInvoice = () => {
             <Dialog open={editOpen} onOpenChange={setEditOpen}>
                 <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
                     <DialogHeader><DialogTitle>Edit Sale: {editingSale?.po_number}</DialogTitle></DialogHeader>
-                    {editingSale && (
-                        <div className="space-y-4 py-2">
-                            {/* PO Context Info */}
-                            <div className="rounded-lg border border-border bg-muted/30 p-4 space-y-3">
-                                <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Sale Information (Editable)</p>
-                                <div className="space-y-4">
-                                    <div className="space-y-1">
-                                        <Label>Item(s) Dispatched</Label>
-                                        <Input value={editManualItem} readOnly className="bg-muted cursor-not-allowed" />
+                            {editingSale && (
+                                <div className="space-y-4 py-2">
+                                    <div className="grid grid-cols-2 gap-3 text-sm">
+                                        <Field label="Items" value={editingSale.item} full />
+                                        <Field label="Dispatched Qty" value={`${editingSale.dispatched_qty} ${editingSale.uom || "Nos"}`} />
                                     </div>
-                                    <div className="grid grid-cols-3 gap-4 text-sm">
-                                        <div className="space-y-1">
-                                            <Label>Base Rate</Label>
-                                            <Input type="number" value={editManualUnitPrice} readOnly className="bg-muted cursor-not-allowed" />
+                                    <div className="rounded-lg border border-border bg-muted/50 overflow-hidden">
+                                        <div className="bg-muted px-3 py-2 text-xs font-semibold uppercase tracking-wider">Item Details (Editable)</div>
+                                        <div className="overflow-x-auto">
+                                            <table className="w-full text-xs">
+                                                <thead className="bg-muted/30">
+                                                    <tr>
+                                                        <th className="text-left p-2">Item</th>
+                                                        <th className="text-center p-2 w-16">UOM</th>
+                                                        <th className="text-center p-2 w-20">Qty</th>
+                                                        <th className="text-right p-2 w-24">Rate</th>
+                                                        <th className="text-right p-2 w-20">GST %</th>
+                                                        <th className="text-right p-2 w-24">Total</th>
+                                                    </tr>
+                                                </thead>
+                                                <tbody>
+                                                    {editItems.map((item, idx) => (
+                                                        <tr key={idx} className="border-t border-border/50">
+                                                            <td className="p-2">
+                                                                <Input className="h-8 text-xs bg-background" value={item.item} onChange={e => updateEditItem(idx, "item", e.target.value)} />
+                                                            </td>
+                                                            <td className="p-2 text-center">
+                                                                <Select value={item.uom} onValueChange={v => updateEditItem(idx, "uom", v)}>
+                                                                    <SelectTrigger className="h-8 text-[10px] px-1 bg-background">
+                                                                        <SelectValue />
+                                                                    </SelectTrigger>
+                                                                    <SelectContent>
+                                                                        {uom_options.map(u => <SelectItem key={u} value={u}>{u}</SelectItem>)}
+                                                                    </SelectContent>
+                                                                </Select>
+                                                            </td>
+                                                            <td className="p-2 text-center">
+                                                                <Input type="number" className="h-8 text-xs text-center bg-background" value={item.quantity} onChange={e => updateEditItem(idx, "quantity", e.target.value)} />
+                                                            </td>
+                                                            <td className="p-2 text-right">
+                                                                <Input type="number" className="h-8 text-xs text-right bg-background" value={item.unit_price} onChange={e => updateEditItem(idx, "unit_price", e.target.value)} />
+                                                            </td>
+                                                            <td className="p-2 text-right">
+                                                                <Input type="number" className="h-8 text-xs text-right bg-background" value={item.gst_rate} onChange={e => updateEditItem(idx, "gst_rate", e.target.value)} />
+                                                            </td>
+                                                            <td className="p-2 text-right font-bold">{inr((Number(item.subtotal) || 0) + (Number(item.gst_amount) || 0))}</td>
+                                                        </tr>
+                                                    ))}
+                                                </tbody>
+                                            </table>
                                         </div>
-                                        <div className="space-y-1">
-                                            <Label>GST %</Label>
-                                            <Input type="number" value={editManualGstRate} readOnly className="bg-muted cursor-not-allowed" />
-                                        </div>
-                                        <div className="space-y-1">
-                                            <Label>Total Freight</Label>
-                                            <Input type="number" value={editManualFreight} onChange={e => setEditManualFreight(e.target.value)} />
+                                        <div className="bg-primary/5 p-3 flex flex-wrap justify-between items-center text-[11px] border-t border-border">
+                                            <div className="flex flex-wrap items-center gap-x-6 gap-y-2">
+                                                <span className="text-muted-foreground">Subtotal: <b className="text-foreground">{inr(editSubtotal)}</b></span>
+                                                <div className="flex items-center gap-2">
+                                                    <span className="text-muted-foreground whitespace-nowrap">GST (%):</span>
+                                                    <Input
+                                                        type="number"
+                                                        className="h-7 w-14 text-[11px] py-0 px-2 text-center bg-background"
+                                                        placeholder="Rate"
+                                                        value={editManualTotalGstRate}
+                                                        onChange={(e) => setEditManualTotalGstRate(e.target.value)}
+                                                    />
+                                                    <span className="text-muted-foreground">({inr(editGstAmount)})</span>
+                                                </div>
+                                                <div className="flex items-center gap-2">
+                                                    <span className="text-muted-foreground whitespace-nowrap">Freight:</span>
+                                                    <Input
+                                                        type="number"
+                                                        className="h-7 w-20 text-right text-[11px] bg-background"
+                                                        value={editManualFreight}
+                                                        onChange={(e) => setEditManualFreight(e.target.value)}
+                                                    />
+                                                </div>
+                                            </div>
+                                            <div className="text-sm font-bold text-primary">
+                                                Grand Total: {inr(editGrandTotal)}
+                                            </div>
                                         </div>
                                     </div>
-                                </div>
-                            </div>
-
                             {/* 1. Invoice Details */}
                             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-2 border-t border-border">
                                 <div className="space-y-1">
@@ -917,21 +1360,18 @@ const SalesInvoice = () => {
                                     <Input value={editInvoiceNumber} onChange={(e) => setEditInvoiceNumber(e.target.value)} />
                                 </div>
                                 <div className="space-y-1">
-                                    <Label>Upload Updated Invoice Document</Label>
-                                    <div className="flex items-center gap-2">
-                                        <Input type="file" className="hidden" id="edit-invoice-file-upload" onChange={handleEditInvoiceUpload} accept=".pdf,.jpg,.jpeg,.png" />
-                                        <Button type="button" variant="outline" className="w-full" onClick={() => document.getElementById("edit-invoice-file-upload").click()}>
+                                    <Label>Upload Updated Invoice Document(s) {editInvoiceUrl && <span className="ml-1 text-primary">({editInvoiceUrl.split(";").filter(Boolean).length})</span>}</Label>
+                                    <div className="space-y-2">
+                                        <Input type="file" multiple className="hidden" id="edit-invoice-file-upload" onChange={handleEditInvoiceUpload} accept=".pdf,.jpg,.jpeg,.png" />
+                                        <Button type="button" variant="outline" className="w-full border-slate-900 text-slate-900 hover:bg-slate-50" onClick={() => document.getElementById("edit-invoice-file-upload").click()}>
                                             <FileText className={`h-4 w-4 mr-2 ${editInvoiceUrl ? "text-green-500" : "text-red-500"}`} />
-                                            {editInvoiceUrl ? "Invoice Uploaded ✓" : "Upload Invoice"}
+                                            {editInvoiceUrl ? `${editInvoiceUrl.split(";").length} File(s) Uploaded` : "Upload Invoice(s)"}
                                         </Button>
                                         {editInvoiceUrl && (
-                                            <div className="flex items-center gap-2">
-                                                <Button type="button" variant="ghost" size="sm" onClick={() => setEditInvoiceUrl("")} className="text-destructive hover:bg-destructive/10">
-                                                    <Trash2 className="h-4 w-4 mr-2" />
-                                                </Button>
-                                                <Button type="button" variant="link" size="sm" className="text-primary text-xs" onClick={() => window.open(`http://localhost:8000${editInvoiceUrl}`, "_blank")}>
-                                                    View
-                                                </Button>
+                                            <div className="grid grid-cols-1 gap-2 mt-2">
+                                                {editInvoiceUrl.split(";").map((url, i) => (
+                                                    <FileItem key={i} url={url} onRemove={() => handleRemoveFile("edit-invoice", url)} />
+                                                ))}
                                             </div>
                                         )}
                                     </div>
@@ -945,26 +1385,23 @@ const SalesInvoice = () => {
                                     <Input value={editEWayBillNo} onChange={(e) => setEditEWayBillNo(e.target.value)} />
                                 </div>
                                 <div className="space-y-1">
-                                    <Label>Upload Updated e-Way Bill Document</Label>
-                                    <div className="flex items-center gap-2">
-                                        <Input type="file" className="hidden" id="edit-eway-file-upload" onChange={handleEditEWayBillUpload} accept=".pdf,.jpg,.jpeg,.png" />
-                                        <Button type="button" variant="outline" className="w-full" onClick={() => document.getElementById("edit-eway-file-upload").click()}>
+                                    <Label>Upload Updated e-Way Bill Document(s) {editEWayBillUrl && <span className="ml-1 text-primary">({editEWayBillUrl.split(";").filter(Boolean).length})</span>}</Label>
+                                    <div className="space-y-2">
+                                        <Input type="file" multiple className="hidden" id="edit-eway-file-upload" onChange={handleEditEWayBillUpload} accept=".pdf,.jpg,.jpeg,.png" />
+                                        <Button type="button" variant="outline" className="w-full border-slate-900 text-slate-900 hover:bg-slate-50" onClick={() => document.getElementById("edit-eway-file-upload").click()}>
                                             <Receipt className={`h-4 w-4 mr-2 ${editEWayBillUrl ? "text-green-500" : "text-red-500"}`} />
-                                            {editEWayBillUrl ? "e-Way Bill Uploaded ✓" : "Upload e-Way Bill"}
+                                            {editEWayBillUrl ? `${editEWayBillUrl.split(";").length} File(s) Uploaded` : "Upload e-Way Bill(s)"}
                                         </Button>
                                         {editEWayBillUrl && (
-                                            <div className="flex items-center gap-2">
-                                                <Button type="button" variant="ghost" size="sm" onClick={() => setEditEWayBillUrl("")} className="text-destructive hover:bg-destructive/10">
-                                                    <Trash2 className="h-4 w-4 mr-2" />
-                                                </Button>
-                                                <Button type="button" variant="link" size="sm" className="text-primary text-xs" onClick={() => window.open(`http://localhost:8000${editEWayBillUrl}`, "_blank")}>
-                                                    View
-                                                </Button>
+                                            <div className="grid grid-cols-1 gap-2 mt-2">
+                                                {editEWayBillUrl.split(";").map((url, i) => (
+                                                    <FileItem key={i} url={url} onRemove={() => handleRemoveFile("edit-eway", url)} />
+                                                ))}
                                             </div>
                                         )}
                                     </div>
                                 </div>
-                            </div>
+                                </div>
 
                             {/* 3. Buyer's Order & 4. Dispatched Through */}
                             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-2 border-t border-border">
@@ -996,14 +1433,8 @@ const SalesInvoice = () => {
                                 </div>
                             </div>
 
-                            {/* Dispatch Quantity */}
-                            <div className="space-y-1 pt-2 border-t border-border">
-                                <Label>Total Dispatch Quantity</Label>
-                                <Input type="number" value={editDispatchQty} readOnly className="bg-muted cursor-not-allowed" />
-                            </div>
-
                             {/* HSN/SAC */}
-                            <div className="space-y-1">
+                            <div className="space-y-1 pt-2 border-t border-border">
                                 <Label>HSN/SAC</Label>
                                 <Input
                                     placeholder="Enter HSN/SAC code"
@@ -1011,24 +1442,6 @@ const SalesInvoice = () => {
                                     onChange={(e) => setEditHsnCode(e.target.value)}
                                 />
                             </div>
-
-                            {editPoCalc && (
-                                <div className="space-y-3">
-                                    <div className="rounded-lg bg-primary/5 border border-primary/20 p-3">
-                                        <div className="flex flex-wrap gap-x-6 gap-y-2 text-sm">
-                                            <div className="flex flex-col border-l border-primary/20 pl-4">
-                                                <span className="text-[10px] uppercase text-muted-foreground">Updated Grand Total</span>
-                                                <span className="font-bold text-primary">{inr(editPoCalc.grandTotal)}</span>
-                                            </div>
-                                        </div>
-                                        <div className="mt-2 pt-2 border-t border-primary/10 flex flex-wrap gap-x-4 text-[11px] text-muted-foreground">
-                                            <span>Subtotal: {inr(editPoCalc.subtotal)}</span>
-                                            <span>GST {editPoCalc.gstRate}%: {inr(editPoCalc.gstAmount)}</span>
-                                            <span>Freight: {inr(editPoCalc.freight)}</span>
-                                        </div>
-                                    </div>
-                                </div>
-                            )}
 
                             {/* Payment Status */}
                             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-2 border-t border-border">
@@ -1055,26 +1468,120 @@ const SalesInvoice = () => {
                 </DialogContent>
             </Dialog>
 
+
+
             {/* Dispatch More Dialog */}
             <Dialog open={dispatchOpen} onOpenChange={setDispatchOpen}>
-                <DialogContent className="max-w-md">
-                    <DialogHeader><DialogTitle>Dispatch More</DialogTitle></DialogHeader>
-                    {dispatchTarget && (() => {
-                        const po = orders.find((o) => o.id === dispatchTarget.po_id);
-                        const remaining = po ? pendingOnPO(po) : 0;
-                        return (
-                            <div className="space-y-4 py-2">
-                                <div className="text-sm text-muted-foreground">PO: <span className="font-medium text-foreground">{dispatchTarget.po_number}</span></div>
+                <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+                    <DialogHeader>
+                        <DialogTitle>
+                            {dispatchTarget ? "Add Items to Existing Dispatch" : "Quick Dispatch"}: {dispatchTarget?.po_number || poData?.po_number}
+                        </DialogTitle>
+                    </DialogHeader>
+                    {poData && (
+                        <div className="space-y-4 py-2">
+                            <div className="space-y-4">
                                 <div className="space-y-1">
-                                    <Label>Additional Quantity <span className="text-xs text-muted-foreground">(max: {remaining} {dispatchTarget.uom})</span></Label>
-                                    <Input type="number" min="1" max={remaining} value={dispatchAdd} onChange={(e) => setDispatchAdd(e.target.value)} />
+                                    <Label>Item Name (Select from PO) *</Label>
+                                    <Select value={selectedLineItemId} onValueChange={handleItemChange}>
+                                        <SelectTrigger>
+                                            <SelectValue placeholder={manualItem || "Select an item"} />
+                                        </SelectTrigger>
+                                        <SelectContent>
+                                            {poData.line_items?.length > 0 ? (
+                                                poData.line_items.map((li) => (
+                                                    <SelectItem key={li.id} value={li.id.toString()}>
+                                                        {li.item} ({getRealTimePending(li.id)} pending)
+                                                    </SelectItem>
+                                                ))
+                                            ) : (
+                                                <SelectItem value="default">{poData.item} ({getRealTimePending("default")} pending)</SelectItem>
+                                            )}
+                                        </SelectContent>
+                                    </Select>
                                 </div>
+                                <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
+                                    <div className="space-y-1">
+                                        <Label>Rate (Rate)</Label>
+                                        <Input type="number" value={manualUnitPrice} onChange={e => setManualUnitPrice(e.target.value)} />
+                                    </div>
+                                    <div className="space-y-1">
+                                        <Label>GST %</Label>
+                                        <Input type="number" value={manualGstRate} onChange={e => setManualGstRate(e.target.value)} />
+                                    </div>
+                                    <div className="space-y-1">
+                                        <Label>UOM</Label>
+                                        <Select value={manualUom} onValueChange={setManualUom}>
+                                            <SelectTrigger className="h-10">
+                                                <SelectValue placeholder="UOM" />
+                                            </SelectTrigger>
+                                            <SelectContent>
+                                                {uom_options.map((u) => (
+                                                    <SelectItem key={u} value={u}>{u}</SelectItem>
+                                                ))}
+                                            </SelectContent>
+                                        </Select>
+                                    </div>
+                                    <div className="space-y-1">
+                                        <div className="flex justify-between items-center">
+                                            <Label>Qty</Label>
+                                            {selectedLineItemId && (
+                                                <span className="text-[10px] font-medium text-amber-600 bg-amber-50 px-1.5 py-0.5 rounded border border-amber-100">
+                                                    Pending: {getRealTimePending(selectedLineItemId)}
+                                                </span>
+                                            )}
+                                        </div>
+                                        <Input 
+                                            type="number" 
+                                            placeholder={selectedLineItemId ? `Max: ${getRealTimePending(selectedLineItemId)}` : ""}
+                                            value={dispatchQty} 
+                                            onChange={(e) => setDispatchQty(e.target.value)} 
+                                        />
+                                    </div>
+                                </div>
+                                <Button type="button" variant="outline" className="w-full border-dashed border-primary text-primary hover:bg-primary/5" onClick={addItemToDispatch}>
+                                    <Plus className="h-4 w-4 mr-2" /> Add Item to this Dispatch
+                                </Button>
                             </div>
-                        );
-                    })()}
+
+                            {dispatchItems.length > 0 && (
+                                <div className="space-y-3 pt-4 border-t border-border">
+                                    <Label className="text-xs font-semibold text-primary uppercase">Items to Dispatch</Label>
+                                    <div className="rounded-lg border border-border overflow-hidden">
+                                        <table className="w-full text-xs text-left">
+                                            <thead className="bg-muted text-muted-foreground font-medium border-b border-border">
+                                                <tr>
+                                                    <th className="p-2">Item Name</th>
+                                                    <th className="p-2 text-center">Dispatch Qty</th>
+                                                    <th className="p-2 text-right">Total</th>
+                                                    <th className="p-2"></th>
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                                {dispatchItems.map((item, idx) => (
+                                                    <tr key={idx} className="border-b border-border/50">
+                                                        <td className="p-2">
+                                                            <div className="font-medium">{item.item}</div>
+                                                        </td>
+                                                        <td className="p-2 text-center font-semibold text-primary">{item.quantity} {item.uom}</td>
+                                                        <td className="p-2 text-right font-bold">{inr(item.total_amount)}</td>
+                                                        <td className="p-2">
+                                                            <Button variant="ghost" size="sm" onClick={() => removeItemFromDispatch(idx)} className="h-6 w-6 p-0 text-destructive">
+                                                                <X className="h-3 w-3" />
+                                                            </Button>
+                                                        </td>
+                                                    </tr>
+                                                ))}
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                </div>
+                            )}
+                        </div>
+                    )}
                     <DialogFooter>
                         <Button variant="outline" onClick={() => setDispatchOpen(false)}>Cancel</Button>
-                        <Button onClick={handleDispatch} className="bg-gradient-primary" disabled={updateMutation.isPending}>Dispatch</Button>
+                        <Button onClick={handleQuickDispatch} className="bg-gradient-primary" disabled={createMutation.isPending}>Confirm Quick Dispatch</Button>
                     </DialogFooter>
                 </DialogContent>
             </Dialog>
@@ -1088,9 +1595,9 @@ const SalesInvoice = () => {
                             <div className="grid grid-cols-2 gap-3 text-sm">
                                 <Field label="PO Number" value={viewSale.po_number} />
                                 <Field label="Client" value={viewSale.client_name} />
-                                <Field label="Item" value={viewSale.item} full />
+                                <Field label="Items" value={viewSale.item} full />
                                 <Field label="Invoice #" value={viewSale.invoice_number} />
-                                <Field label="Dispatched Qty" value={`${viewSale.dispatched_qty} ${viewSale.uom}`} />
+                                <Field label="Dispatched Qty" value={`${viewSale.dispatched_qty} ${viewSale.uom || "Nos"}`} />
                                 <Field label="Grand Total" value={inr(viewSale.grand_total)} />
                                 <Field label="Payment Status" value={viewSale.payment_status} />
                                 <Field label="Delivery Status" value={viewSale.delivery_status} />
@@ -1102,7 +1609,7 @@ const SalesInvoice = () => {
                             </div>
                             <div className="rounded-lg border border-border bg-muted/30 p-4 space-y-4">
                                 <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Item Details</p>
-                                <div className="rounded-md border border-border overflow-hidden">
+                                <div className="rounded-md border border-border overflow-x-auto">
                                     <table className="w-full text-xs text-left">
                                         <thead className="bg-muted text-muted-foreground font-medium border-b border-border">
                                             <tr>
@@ -1120,27 +1627,37 @@ const SalesInvoice = () => {
                                                     <td className="p-2 text-center">{it.quantity} {it.uom}</td>
                                                     <td className="p-2 text-right">{inr(it.unit_price)}</td>
                                                     <td className="p-2 text-right">{inr(it.gst_amount)} ({it.gst_rate}%)</td>
-                                                    <td className="p-2 text-right font-bold">{inr(it.total_amount)}</td>
+                                                    <td className="p-2 text-right font-bold">{inr((Number(it.subtotal) || 0) + (Number(it.gst_amount) || 0))}</td>
                                                 </tr>
                                             ))}
                                         </tbody>
                                         <tfoot className="bg-muted/50 font-semibold">
-                                            <tr>
-                                                <td colSpan="4" className="p-2 text-right">Subtotal:</td>
-                                                <td className="p-2 text-right">{inr(viewSale.subtotal)}</td>
-                                            </tr>
-                                            <tr>
-                                                <td colSpan="4" className="p-2 text-right">Total GST:</td>
-                                                <td className="p-2 text-right">{inr(viewSale.gst_amount)}</td>
-                                            </tr>
-                                            <tr>
-                                                <td colSpan="4" className="p-2 text-right">Freight:</td>
-                                                <td className="p-2 text-right">{inr(viewSale.freight)}</td>
-                                            </tr>
-                                            <tr className="text-primary bg-primary/5 text-sm">
-                                                <td colSpan="4" className="p-2 text-right">Grand Total:</td>
-                                                <td className="p-2 text-right">{inr(viewSale.grand_total)}</td>
-                                            </tr>
+                                            {(() => {
+                                                const items = viewSale.items || [];
+                                                const calcSubtotal = items.reduce((acc, it) => acc + (Number(it.subtotal) || 0), 0);
+                                                const calcGst = items.reduce((acc, it) => acc + (Number(it.gst_amount) || 0), 0);
+                                                const freight = Number(viewSale.freight) || 0;
+                                                return (
+                                                    <>
+                                                        <tr>
+                                                            <td colSpan="4" className="p-2 text-right">Subtotal:</td>
+                                                            <td className="p-2 text-right">{inr(calcSubtotal)}</td>
+                                                        </tr>
+                                                        <tr>
+                                                            <td colSpan="4" className="p-2 text-right">Total GST:</td>
+                                                            <td className="p-2 text-right">{inr(calcGst)}</td>
+                                                        </tr>
+                                                        <tr>
+                                                            <td colSpan="4" className="p-2 text-right">Freight:</td>
+                                                            <td className="p-2 text-right">{inr(freight)}</td>
+                                                        </tr>
+                                                        <tr className="text-primary bg-primary/5 text-sm">
+                                                            <td colSpan="4" className="p-2 text-right">Grand Total:</td>
+                                                            <td className="p-2 text-right">{inr(calcSubtotal + calcGst + freight)}</td>
+                                                        </tr>
+                                                    </>
+                                                );
+                                            })()}
                                         </tfoot>
                                     </table>
                                 </div>
@@ -1148,27 +1665,33 @@ const SalesInvoice = () => {
 
                             <div className="grid grid-cols-2 gap-4 text-sm">
                                 <div className="space-y-1">
-                                    <div className="text-[11px] uppercase tracking-wider text-muted-foreground">Invoice Doc</div>
-                                    {viewSale.invoice_url ? (
-                                        <Button type="button" variant="link" size="sm" className="p-0 h-auto text-primary" onClick={() => window.open(`http://localhost:8000${viewSale.invoice_url}`, "_blank")}>
-                                            View Invoice
-                                        </Button>
+                                    <div className="text-[11px] uppercase tracking-wider text-muted-foreground">Invoice Doc(s)</div>
+                                    {viewSale.invoice_urls?.length > 0 ? (
+                                        <div className="grid grid-cols-1 gap-2 mt-1">
+                                            {viewSale.invoice_urls.map((url, i) => (
+                                                <FileItem key={i} url={url} />
+                                            ))}
+                                        </div>
                                     ) : <span className="text-xs text-muted-foreground">—</span>}
                                 </div>
                                 <div className="space-y-1">
-                                    <div className="text-[11px] uppercase tracking-wider text-muted-foreground">e-Way Bill Doc</div>
-                                    {viewSale.e_way_bill_url ? (
-                                        <Button type="button" variant="link" size="sm" className="p-0 h-auto text-primary" onClick={() => window.open(`http://localhost:8000${viewSale.e_way_bill_url}`, "_blank")}>
-                                            View e-Way Bill
-                                        </Button>
+                                    <div className="text-[11px] uppercase tracking-wider text-muted-foreground">e-Way Bill Doc(s)</div>
+                                    {viewSale.e_way_bill_urls?.length > 0 ? (
+                                        <div className="grid grid-cols-1 gap-2 mt-1">
+                                            {viewSale.e_way_bill_urls.map((url, i) => (
+                                                <FileItem key={i} url={url} />
+                                            ))}
+                                        </div>
                                     ) : <span className="text-xs text-muted-foreground">—</span>}
                                 </div>
                                 <div className="space-y-1">
                                     <div className="text-[11px] uppercase tracking-wider text-muted-foreground">Delivery Challan</div>
-                                    {viewSale.delivery_challan_url ? (
-                                        <Button type="button" variant="link" size="sm" className="p-0 h-auto text-primary" onClick={() => window.open(`http://localhost:8000${viewSale.delivery_challan_url}`, "_blank")}>
-                                            View Challan
-                                        </Button>
+                                    {viewSale.delivery_challan_urls?.length > 0 ? (
+                                        <div className="grid grid-cols-1 gap-2 mt-1">
+                                            {viewSale.delivery_challan_urls.map((url, i) => (
+                                                <FileItem key={i} url={url} />
+                                            ))}
+                                        </div>
                                     ) : <span className="text-xs text-muted-foreground">—</span>}
                                 </div>
                                 <Field label="Buyer's Order No." value={viewSale.buyers_order_no} full />
@@ -1216,8 +1739,8 @@ const SalesInvoice = () => {
             )}
 
             {/* Sales List */}
-            {isLoading ? (
-                <Card className="p-12 text-center shadow-card"><p className="text-muted-foreground">Loading sales...</p></Card>
+            {isLoading && sales.length === 0 ? (
+                <Card className="p-12 text-center shadow-card"><p className="text-muted-foreground">Loading sales records...</p></Card>
             ) : filteredSales.length === 0 ? (
                 <Card className="p-12 text-center shadow-card">
                     <Package className="h-10 w-10 text-muted-foreground mx-auto mb-3" />
@@ -1227,10 +1750,13 @@ const SalesInvoice = () => {
                 </Card>
             ) : (
                 <div className="space-y-4">
-                    {filteredSales.map((sale) => {
-                        const po = orders.find((o) => o.id === sale.po_id);
+                    {(filteredSales || []).map((sale) => {
+                        const po = (orders || []).find((o) => o.id === sale.po_id);
                         const currentPending = po ? pendingOnPO(po) : 0;
-                        const totalDispatched = sale.items?.reduce((acc, it) => acc + it.quantity, 0) || 0;
+                        const totalDispatched = (sale.items || []).reduce((acc, it) => acc + (it.quantity || 0), 0) || 0;
+                        const calcSubtotal = (sale.items || []).reduce((acc, it) => acc + (Number(it.subtotal) || 0), 0);
+                        const calcGst = (sale.items || []).reduce((acc, it) => acc + (Number(it.gst_amount) || 0), 0);
+                        const calcGrand = calcSubtotal + calcGst + (Number(sale.freight) || 0);
                         return (
                             <Card key={sale.id} className="p-5 shadow-card space-y-4">
                                 <div className="flex flex-wrap items-center justify-between gap-2">
@@ -1247,8 +1773,16 @@ const SalesInvoice = () => {
                                             label={sale.payment_status}
                                         />
                                         <StatusBadge
-                                            status={sale.delivery_status === "Delivered" ? "Delivered" : "Not Delivered"}
-                                            label={sale.delivery_status}
+                                            status={
+                                                (po?.all_dispatches_marked && po?.delivery_status === "Delivered") ? "Delivered" :
+                                                (sale.delivery_status === "Delivered" || po?.delivery_status === "Partial") ? "Partial" :
+                                                "Not Delivered"
+                                            }
+                                            label={
+                                                (po?.all_dispatches_marked && po?.delivery_status === "Delivered") ? "Delivered" :
+                                                sale.delivery_status === "Delivered" ? "Partially Delivered" : 
+                                                "Not Delivered"
+                                            }
                                         />
                                         <Tooltip>
                                             <TooltipTrigger asChild>
@@ -1270,64 +1804,35 @@ const SalesInvoice = () => {
                                             <TooltipContent><p>Edit Sale</p></TooltipContent>
                                         </Tooltip>
 
-                                        <Tooltip>
-                                            <TooltipTrigger asChild>
-                                                <button
-                                                    onClick={() => {
-                                                        if (sale.invoice_url) {
-                                                            window.open(`http://localhost:8000${sale.invoice_url}`, "_blank");
-                                                        } else {
-                                                            setUploadingSaleId(sale.id);
-                                                            document.getElementById("direct-invoice-upload").click();
-                                                        }
-                                                    }}
-                                                    className="inline-flex items-center justify-center h-8 w-8 rounded-md hover:bg-muted transition-colors"
-                                                >
-                                                    {sale.invoice_url ? (
-                                                        <FileText className="h-4 w-4 text-green-500" />
-                                                    ) : (
-                                                        <UploadCloud className="h-4 w-4 text-red-500" />
-                                                    )}
-                                                </button>
-                                            </TooltipTrigger>
-                                            <TooltipContent><p>{sale.invoice_url ? "View Invoice" : "Upload Invoice"}</p></TooltipContent>
-                                        </Tooltip>
+                                        <FilePopover
+                                            urls={sale.invoice_url}
+                                            icon={FileText}
+                                            label="Invoice"
+                                            saleId={sale.id}
+                                            onUploadClick={() => {
+                                                setUploadingSaleId(sale.id);
+                                                document.getElementById("direct-invoice-upload").click();
+                                            }}
+                                        />
 
-                                        <Tooltip>
-                                            <TooltipTrigger asChild>
-                                                <button
-                                                    onClick={() => {
-                                                        if (sale.e_way_bill_url) {
-                                                            window.open(`http://localhost:8000${sale.e_way_bill_url}`, "_blank");
-                                                        } else {
-                                                            setUploadingSaleId(sale.id);
-                                                            document.getElementById("direct-eway-upload").click();
-                                                        }
-                                                    }}
-                                                    className="inline-flex items-center justify-center h-8 w-8 rounded-md hover:bg-muted transition-colors"
-                                                >
-                                                    {sale.e_way_bill_url ? (
-                                                        <Receipt className="h-4 w-4 text-green-500" />
-                                                    ) : (
-                                                        <Receipt className="h-4 w-4 text-red-500" />
-                                                    )}
-                                                </button>
-                                            </TooltipTrigger>
-                                            <TooltipContent><p>{sale.e_way_bill_url ? "View e-Way Bill" : "Upload e-Way Bill"}</p></TooltipContent>
-                                        </Tooltip>
+                                        <FilePopover
+                                            urls={sale.e_way_bill_url}
+                                            icon={Receipt}
+                                            label="e-Way Bill"
+                                            saleId={sale.id}
+                                            onUploadClick={() => {
+                                                setUploadingSaleId(sale.id);
+                                                document.getElementById("direct-eway-upload").click();
+                                            }}
+                                        />
 
                                         {sale.delivery_challan_url && (
-                                            <Tooltip>
-                                                <TooltipTrigger asChild>
-                                                    <button 
-                                                        onClick={() => window.open(`http://localhost:8000${sale.delivery_challan_url}`, "_blank")} 
-                                                        className="inline-flex items-center justify-center h-8 w-8 rounded-md hover:bg-muted transition-colors"
-                                                    >
-                                                        <FileText className="h-4 w-4 text-blue-500" />
-                                                    </button>
-                                                </TooltipTrigger>
-                                                <TooltipContent><p>View Delivery Challan</p></TooltipContent>
-                                            </Tooltip>
+                                            <FilePopover
+                                                urls={sale.delivery_challan_url}
+                                                icon={FileText}
+                                                label="Delivery Challan"
+                                                saleId={sale.id}
+                                            />
                                         )}
 
                                         <Tooltip>
@@ -1344,10 +1849,12 @@ const SalesInvoice = () => {
 
                                 <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3 text-sm">
                                     <Field label="Items" value={sale.item} full />
+                                    <Field label="Dispatched Qty" value={`${sale.dispatched_qty} ${sale.uom || "Nos"}`} />
                                     <Field label="Project" value={sale.project} />
-                                    <Field label="Invoice Total" value={inr(sale.grand_total)} />
-                                    <Field label="Subtotal" value={inr(sale.subtotal)} />
-                                    <Field label="Total GST" value={inr(sale.gst_amount)} />
+                                    <Field label="Total Docs" value={`${(sale.invoice_url?.split(";")?.filter(Boolean)?.length || 0) + (sale.e_way_bill_url?.split(";")?.filter(Boolean)?.length || 0) + (sale.delivery_challan_url?.split(";")?.filter(Boolean)?.length || 0)} File(s)`} />
+                                    <Field label="Invoice Total" value={inr(calcGrand)} />
+                                    <Field label="Subtotal" value={inr(calcSubtotal)} />
+                                    <Field label="Total GST" value={inr(calcGst)} />
                                     <Field label="Freight" value={inr(sale.freight)} />
                                     <Field label="Dispatched Through" value={sale.dispatched_through} />
                                     <Field label="HSN/SAC" value={sale.hsn_code} />
@@ -1368,13 +1875,13 @@ const SalesInvoice = () => {
                                 </div>
 
                                 <div className="flex flex-wrap gap-2">
-                                    <Button size="xs" variant="outline" onClick={() => openDispatch(sale)}>
+                                    <Button size="xs" variant="outline" className="border-slate-900 text-slate-900 hover:bg-slate-50" onClick={() => openDispatch(sale)}>
                                         <Truck className="h-3 w-3 mr-1" /> Dispatch More
                                     </Button>
-                                    <Button size="xs" variant="outline" onClick={() => openInvoiceDocument(sale.id)}>
+                                    <Button size="xs" variant="outline" className="border-slate-900 text-slate-900 hover:bg-slate-50" onClick={() => openInvoiceDocument(sale.id)}>
                                         <Package className="h-3 w-3 mr-1" /> Generate Invoice
                                     </Button>
-                                    <Button size="xs" variant="outline" onClick={() => downloadInvoiceDocument(sale.id)}>
+                                    <Button size="xs" variant="outline" className="border-slate-900 text-slate-900 hover:bg-slate-50" onClick={() => downloadInvoiceDocument(sale.id)}>
                                         <Download className="h-3 w-3 mr-1" /> Download Invoice
                                     </Button>
                                     <Button
@@ -1388,22 +1895,49 @@ const SalesInvoice = () => {
                                                 document.getElementById("direct-eway-upload").click();
                                             }
                                         }}
-                                        className={sale.e_way_bill_url ? "text-green-600 border-green-200 hover:bg-green-50" : ""}
+                                        className="border-slate-900 text-slate-900 hover:bg-slate-50"
                                     >
                                         <Receipt className="h-3 w-3 mr-1" />
                                         {sale.e_way_bill_url ? "View e-Way Bill" : "Upload e-Way Bill"}
                                     </Button>
-                                    {sale.delivery_status !== "Delivered" && (
-                                        <Button size="xs" variant="outline" className="text-green-600 border-green-200 hover:bg-green-50" onClick={() => {
-                                            setMarkDeliveredTarget(sale);
-                                            setDeliveryChallanUrl("");
-                                            setMarkDeliveredOpen(true);
-                                        }}>
-                                            <CheckCircle className="h-3 w-3 mr-1" /> Mark Delivered
-                                        </Button>
-                                    )}
+                                    {(() => {
+                                        // 1. Helper to verify if a sale has a valid challan document
+                                        const hasValidChallan = (url) => {
+                                            if (!url) return false;
+                                            return url.split(";").filter(u => u && u.trim() !== "").length > 0;
+                                        };
+
+                                        const currentSaleHasChallan = hasValidChallan(sale.delivery_challan_url);
+
+                                        // 2. Final decision for the button color using backend-provided flags
+                                        const isFullyComplete = po?.all_dispatches_marked && po?.delivery_status === "Delivered";
+
+                                        let finalBtnClass = "bg-red-600 border-red-600 text-white hover:bg-red-700"; // Default: Red (No challan)
+                                        
+                                        if (currentSaleHasChallan) {
+                                            if (isFullyComplete) {
+                                                finalBtnClass = "bg-green-600 border-green-600 text-white hover:bg-green-700"; // Success: Everything done
+                                            } else {
+                                                finalBtnClass = "bg-blue-600 border-blue-600 text-white hover:bg-blue-700"; // Progress: Current done, but others pending
+                                            }
+                                        }
+
+                                        return (
+                                            <Button 
+                                                size="xs" 
+                                                className={finalBtnClass}
+                                                onClick={() => {
+                                                    setMarkDeliveredTarget(sale);
+                                                    setDeliveryChallanUrl(sale.delivery_challan_url || "");
+                                                    setMarkDeliveredOpen(true);
+                                                }}
+                                            >
+                                                <CheckCircle className="h-3 w-3 mr-1" /> Mark Delivered
+                                            </Button>
+                                        );
+                                    })()}
                                     {PAYMENT_STATUS.filter((s) => s !== sale.payment_status).map((s) => (
-                                        <Button key={s} size="xs" variant="outline" onClick={() => handlePaymentUpdate(sale.id, s)}>
+                                        <Button key={s} size="xs" variant="outline" className="border-slate-900 text-slate-900 hover:bg-slate-50" onClick={() => handlePaymentUpdate(sale.id, s)}>
                                             <CreditCard className="h-3 w-3 mr-1" /> Mark {s}
                                         </Button>
                                     ))}
@@ -1435,17 +1969,19 @@ const SalesInvoice = () => {
                     <div className="space-y-4 py-4">
                         <p className="text-sm text-muted-foreground">Upload the delivery challan document to mark this sale as Delivered.</p>
                         <div className="space-y-2">
-                            <Label>Delivery Challan Document *</Label>
-                            <div className="flex items-center gap-2">
-                                <Input type="file" className="hidden" id="challan-file-upload" onChange={handleDeliveryChallanUpload} accept=".pdf,.jpg,.jpeg,.png" />
-                                <Button type="button" variant="outline" className="w-full" onClick={() => document.getElementById("challan-file-upload").click()}>
-                                    <FileText className="h-4 w-4 mr-2" />
-                                    {deliveryChallanUrl ? "Challan Uploaded ✓" : "Upload Challan"}
+                            <Label>Delivery Challan Document(s) * {deliveryChallanUrl && <span className="ml-1 text-primary">({deliveryChallanUrl.split(";").filter(Boolean).length})</span>}</Label>
+                            <div className="space-y-2">
+                                <Input type="file" multiple className="hidden" id="challan-file-upload" onChange={handleDeliveryChallanUpload} accept=".pdf,.jpg,.jpeg,.png" />
+                                <Button type="button" variant="outline" className="w-full border-slate-900 text-slate-900 hover:bg-slate-50" onClick={() => document.getElementById("challan-file-upload").click()}>
+                                    <FileText className={`h-4 w-4 mr-2 ${deliveryChallanUrl ? "text-green-500" : "text-red-500"}`} />
+                                    {deliveryChallanUrl ? `${deliveryChallanUrl.split(";").filter(Boolean).length} File(s) Uploaded` : "Upload Challan(s)"}
                                 </Button>
                                 {deliveryChallanUrl && (
-                                    <Button type="button" variant="ghost" size="icon" onClick={() => setDeliveryChallanUrl("")} title="Remove">
-                                        <X className="h-4 w-4 text-destructive" />
-                                    </Button>
+                                    <div className="grid grid-cols-1 gap-2 mt-2">
+                                        {deliveryChallanUrl.split(";").map((url, i) => (
+                                            <FileItem key={i} url={url} onRemove={() => handleRemoveFile("challan", url)} />
+                                        ))}
+                                    </div>
                                 )}
                             </div>
                         </div>

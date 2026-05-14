@@ -9,8 +9,10 @@ import {
 } from "recharts";
 import { ArrowUpRight, IndianRupee, Package, Truck, Users, AlertCircle } from "lucide-react";
 
-const StatCard = ({ icon: Icon, label, value, delta, accent }) => (
-    <Card className="p-5 shadow-card hover:shadow-elegant transition-shadow border-border/60">
+import { useNavigate } from "react-router-dom";
+
+const StatCard = ({ icon: Icon, label, value, delta, accent, onClick }) => (
+    <Card className={`p-5 shadow-card hover:shadow-elegant transition-shadow border-border/60 ${onClick ? "cursor-pointer" : ""}`} onClick={onClick}>
         <div className="flex items-start justify-between">
             <div>
                 <div className="text-xs font-medium uppercase tracking-wider text-muted-foreground">{label}</div>
@@ -35,6 +37,7 @@ const PIE_COLORS = {
 };
 
 const Dashboard = () => {
+    const navigate = useNavigate();
     const { data: stats } = useQuery({ queryKey: ["dashboard-stats"], queryFn: fetchDashboardStats });
     const { data: charts } = useQuery({ queryKey: ["dashboard-charts"], queryFn: fetchDashboardCharts });
     const { data: recent = [] } = useQuery({ queryKey: ["recent-sales"], queryFn: () => fetchRecentSales(6) });
@@ -44,6 +47,8 @@ const Dashboard = () => {
         color: PIE_COLORS[p.name] || "hsl(var(--muted))",
     }));
 
+    const goToReports = () => navigate("/reports");
+
     return (
         <div className="space-y-6">
             <div>
@@ -52,11 +57,11 @@ const Dashboard = () => {
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
-                <StatCard icon={IndianRupee} label="Total Revenue" value={inr(stats?.total_revenue ?? 0)} accent="bg-primary/10 text-primary" />
-                <StatCard icon={Package} label="Total Orders" value={String(stats?.total_orders ?? 0)} accent="bg-accent/15 text-accent" />
-                <StatCard icon={Users} label="Total Clients" value={String(stats?.total_clients ?? 0)} accent="bg-steel/15 text-steel" />
-                <StatCard icon={Truck} label="Delivered" value={String(stats?.delivered_orders ?? 0)} accent="bg-success/15 text-success" />
-                <StatCard icon={AlertCircle} label="Pending Payments" value={String(stats?.pending_payments ?? 0)} accent="bg-warning/15 text-warning" />
+                <StatCard onClick={goToReports} icon={IndianRupee} label="Total Revenue" value={inr(stats?.total_revenue ?? 0)} accent="bg-primary/10 text-primary" />
+                <StatCard onClick={goToReports} icon={Package} label="Total Orders" value={String(stats?.total_orders ?? 0)} accent="bg-accent/15 text-accent" />
+                <StatCard onClick={goToReports} icon={Users} label="Total Clients" value={String(stats?.total_clients ?? 0)} accent="bg-steel/15 text-steel" />
+                <StatCard onClick={goToReports} icon={Truck} label="Delivered" value={String(stats?.delivered_orders ?? 0)} accent="bg-success/15 text-success" />
+                <StatCard onClick={goToReports} icon={AlertCircle} label="Pending Payments" value={String(stats?.pending_payments ?? 0)} accent="bg-warning/15 text-warning" />
             </div>
 
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
@@ -136,7 +141,7 @@ const Dashboard = () => {
                                     <td className="px-5 py-3 text-muted-foreground">{r.product}</td>
                                     <td className="px-5 py-3 text-right font-semibold">{inr(r.price)}</td>
                                     <td className="px-5 py-3"><StatusBadge status={r.payment_status} /></td>
-                                    <td className="px-5 py-3"><StatusBadge status={r.delivery_status === "Delivered" ? "Delivered" : "Not Delivered"} /></td>
+                                    <td className="px-5 py-3"><StatusBadge status={r.delivery_status} /></td>
                                 </tr>
                             ))}
                             {recent.length === 0 && (

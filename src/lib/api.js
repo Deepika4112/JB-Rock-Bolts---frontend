@@ -1,16 +1,30 @@
-const BASE = import.meta.env.VITE_API_URL || "http://localhost:8000";
+const BASE = import.meta.env.VITE_API_URL || "http://127.0.0.1:8000";
 
 async function request(path, options = {}) {
-    const res = await fetch(`${BASE}${path}`, {
-        headers: { "Content-Type": "application/json", ...options.headers },
-        ...options,
-    });
-    if (!res.ok) {
-        const err = await res.json().catch(() => ({ detail: res.statusText }));
-        throw new Error(err.detail || "Request failed");
+    const url = `${BASE}${path.startsWith("/") ? "" : "/"}${path}`;
+    try {
+        const res = await fetch(url, {
+            mode: "cors",
+            headers: { 
+                "Content-Type": "application/json",
+                "Accept": "application/json",
+                ...options.headers 
+            },
+            ...options,
+        });
+        if (!res.ok) {
+            const err = await res.json().catch(() => ({ detail: res.statusText }));
+            throw new Error(err.detail || `Server error: ${res.status}`);
+        }
+        if (res.status === 204) return null;
+        return res.json();
+    } catch (err) {
+        console.error("Fetch error:", err);
+        if (err.message.includes("Failed to fetch")) {
+            throw new Error("Cannot connect to server. Please check if the backend is running on " + BASE);
+        }
+        throw err;
     }
-    if (res.status === 204) return null;
-    return res.json();
 }
 
 const get = (path, params) => {
@@ -90,6 +104,7 @@ export const deleteRecord = (id) => del(`/api/records/${id}`);
 // ── Reports ──────────────────────────────────────────────────────────────────
 export const fetchReport = (params) => get("/api/reports", params);
 export const fetchFulfillmentReport = (params) => get("/api/reports/fulfillment", params);
+export const fetchPendingPOs = () => get("/api/reports/pending-pos");
 
 // ── Documents (opens in new tab for printing) ─────────────────────────────────
 export const openPODocument = (poId) => {

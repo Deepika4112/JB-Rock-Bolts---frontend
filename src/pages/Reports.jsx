@@ -7,17 +7,17 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { useConstants } from "@/lib/constants";
-import { fetchReport, fetchFulfillmentReport } from "@/lib/api";
+import { fetchReport, fetchFulfillmentReport, fetchPendingPOs } from "@/lib/api";
 import { inr } from "@/lib/format";
 import { toast } from "sonner";
-import { Download, IndianRupee, Package, TrendingUp, ClipboardList, BarChart3 } from "lucide-react";
+import { Download, IndianRupee, Package, TrendingUp, ClipboardList, BarChart3, Clock } from "lucide-react";
 
 const Reports = () => {
     const { products } = useConstants();
     const [tab, setTab] = useState("fulfillment");
     const today = new Date().toISOString().split('T')[0];
-    const [from, setFrom] = useState(today);
-    const [to, setTo] = useState(today);
+    const [from, setFrom] = useState("");
+    const [to, setTo] = useState("");
     const [product, setProduct] = useState("all");
     const [client, setClient] = useState("all");
 
@@ -48,6 +48,12 @@ const Reports = () => {
         enabled: tab === "fulfillment",
     });
 
+    const { data: pendingData, isLoading: pendingLoading } = useQuery({
+        queryKey: ["pendingPOsReport"],
+        queryFn: fetchPendingPOs,
+        enabled: tab === "pending",
+    });
+
     const exportCSV = () => {
         if (tab === "sales") {
             const rows = salesData?.rows || [];
@@ -61,7 +67,7 @@ const Reports = () => {
                 r.payment_status
             ]);
             downloadCSV(headers, csvRows, "sales-report");
-        } else {
+        } else if (tab === "fulfillment") {
             const rows = fulfillmentData?.rows || [];
             if (rows.length === 0) { toast.error("No data to export"); return; }
             const headers = ["Date", "Client Name", "Project Name", "Item", "Total Required", "Delivered", "Pending"];
@@ -75,6 +81,22 @@ const Reports = () => {
                 r.pending
             ]);
             downloadCSV(headers, csvRows, "fulfillment-report");
+        } else {
+            const rows = pendingData?.rows || [];
+            if (rows.length === 0) { toast.error("No data to export"); return; }
+            const headers = ["Date", "PO Number", "Client Name", "Project", "Item", "Value (Excl. GST)", "GST Amount", "Total Value", "Status"];
+            const csvRows = rows.map((r) => [
+                r.date,
+                r.po_number,
+                r.client_name,
+                r.project,
+                r.item,
+                r.subtotal,
+                r.gst_amount,
+                r.total_value,
+                r.status
+            ]);
+            downloadCSV(headers, csvRows, "pending-pos-report");
         }
     };
 
@@ -103,12 +125,15 @@ const Reports = () => {
             </div>
 
             <Tabs value={tab} onValueChange={setTab} className="w-full">
-                <TabsList className="grid w-full grid-cols-2 mb-6 p-1 bg-muted/50 rounded-xl">
+                <TabsList className="grid w-full grid-cols-3 mb-6 p-1 bg-muted/50 rounded-xl">
                     <TabsTrigger value="fulfillment" className="rounded-lg py-2 transition-all data-[state=active]:bg-background data-[state=active]:shadow-sm">
-                        <ClipboardList className="h-4 w-4 mr-2" /> Fulfillment Report
+                        <ClipboardList className="h-4 w-4 mr-2" /> Fulfillment
                     </TabsTrigger>
                     <TabsTrigger value="sales" className="rounded-lg py-2 transition-all data-[state=active]:bg-background data-[state=active]:shadow-sm">
-                        <BarChart3 className="h-4 w-4 mr-2" /> Sales Report
+                        <BarChart3 className="h-4 w-4 mr-2" /> Sales
+                    </TabsTrigger>
+                    <TabsTrigger value="pending" className="rounded-lg py-2 transition-all data-[state=active]:bg-background data-[state=active]:shadow-sm">
+                        <Clock className="h-4 w-4 mr-2" /> Pending POs
                     </TabsTrigger>
                 </TabsList>
 
@@ -148,7 +173,7 @@ const Reports = () => {
                                 </thead>
                                 <tbody>
                                     {fulfillmentLoading && (
-                                        <tr><td colSpan={6} className="px-5 py-12 text-center text-muted-foreground">Loading...</td></tr>
+                                        <tr><td colSpan={7} className="px-5 py-12 text-center text-muted-foreground">Loading...</td></tr>
                                     )}
                                     {fulfillmentData?.rows.map((r) => (
                                         <tr key={r.id} className="border-t border-border hover:bg-muted/30 transition-colors text-[12.5px]">
@@ -162,7 +187,7 @@ const Reports = () => {
                                         </tr>
                                     ))}
                                     {!fulfillmentLoading && fulfillmentData?.rows.length === 0 && (
-                                        <tr><td colSpan={6} className="px-5 py-12 text-center text-muted-foreground">No records found.</td></tr>
+                                        <tr><td colSpan={7} className="px-5 py-12 text-center text-muted-foreground">No records found.</td></tr>
                                     )}
                                 </tbody>
                             </table>
@@ -231,7 +256,7 @@ const Reports = () => {
                                 </thead>
                                 <tbody>
                                     {salesLoading && (
-                                        <tr><td colSpan={6} className="px-5 py-12 text-center text-muted-foreground">Loading...</td></tr>
+                                        <tr><td colSpan={5} className="px-5 py-12 text-center text-muted-foreground">Loading...</td></tr>
                                     )}
                                     {salesData?.rows.map((r) => (
                                         <tr key={r.id} className="border-t border-border hover:bg-muted/30 transition-colors text-[12.5px]">
@@ -243,7 +268,89 @@ const Reports = () => {
                                         </tr>
                                     ))}
                                     {!salesLoading && (!salesData || salesData.rows.length === 0) && (
-                                        <tr><td colSpan={7} className="px-5 py-12 text-center text-muted-foreground">No records match the filters.</td></tr>
+                                        <tr><td colSpan={5} className="px-5 py-12 text-center text-muted-foreground">No records match the filters.</td></tr>
+                                    )}
+                                </tbody>
+                            </table>
+                        </div>
+                    </Card>
+                </TabsContent>
+
+                <TabsContent value="pending" className="space-y-6">
+                    {/* Pending Stat cards */}
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                        <Card className="p-5 shadow-card border-l-4 border-slate-500">
+                            <div className="flex items-center gap-3">
+                                <div className="h-11 w-11 rounded-xl bg-slate-500/10 grid place-items-center"><IndianRupee className="h-5 w-5 text-slate-500" /></div>
+                                <div>
+                                    <div className="text-xs uppercase tracking-wider text-muted-foreground">Original Subtotal</div>
+                                    <div className="text-xl font-bold text-foreground">{inr(pendingData?.total_subtotal ?? 0)}</div>
+                                </div>
+                            </div>
+                        </Card>
+                        <Card className="p-5 shadow-card border-l-4 border-blue-500">
+                            <div className="flex items-center gap-3">
+                                <div className="h-11 w-11 rounded-xl bg-blue-500/10 grid place-items-center"><TrendingUp className="h-5 w-5 text-blue-500" /></div>
+                                <div>
+                                    <div className="text-xs uppercase tracking-wider text-muted-foreground">Total Original GST</div>
+                                    <div className="text-xl font-bold text-foreground">{inr(pendingData?.total_gst ?? 0)}</div>
+                                </div>
+                            </div>
+                        </Card>
+                        <Card className="p-5 shadow-card border-l-4 border-primary">
+                            <div className="flex items-center gap-3">
+                                <div className="h-11 w-11 rounded-xl bg-primary/10 grid place-items-center"><Package className="h-5 w-5 text-primary" /></div>
+                                <div>
+                                    <div className="text-xs uppercase tracking-wider text-muted-foreground">Total Original Value</div>
+                                    <div className="text-xl font-bold text-foreground">{inr(pendingData?.total_value ?? 0)}</div>
+                                </div>
+                            </div>
+                        </Card>
+                        <Card className="p-5 shadow-card border-l-4 border-indigo-500">
+                            <div className="flex items-center gap-3">
+                                <div className="h-11 w-11 rounded-xl bg-indigo-500/10 grid place-items-center"><ClipboardList className="h-5 w-5 text-indigo-500" /></div>
+                                <div>
+                                    <div className="text-xs uppercase tracking-wider text-muted-foreground">Total Pending POs</div>
+                                    <div className="text-xl font-bold text-foreground">{pendingData?.count ?? 0}</div>
+                                </div>
+                            </div>
+                        </Card>
+                    </div>
+
+                    {/* Pending Table */}
+                    <Card className="shadow-card overflow-hidden">
+                        <div className="overflow-x-auto">
+                            <table className="w-full text-sm">
+                                <thead className="bg-muted/50 text-muted-foreground text-[11px] uppercase tracking-wider">
+                                    <tr>
+                                        <th className="text-left font-semibold px-2 py-3">Date</th>
+                                        <th className="text-left font-semibold px-2 py-3">PO Number</th>
+                                        <th className="text-left font-semibold px-2 py-3">Client</th>
+                                        <th className="text-left font-semibold px-2 py-3">Item</th>
+                                        <th className="text-right font-semibold px-2 py-3">Value (Excl. GST)</th>
+                                        <th className="text-right font-semibold px-2 py-3">GST Amount</th>
+                                        <th className="text-right font-semibold px-2 py-3">Total Value</th>
+                                        <th className="text-left font-semibold px-2 py-3">Status</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {pendingLoading && (
+                                        <tr><td colSpan={8} className="px-5 py-12 text-center text-muted-foreground">Loading...</td></tr>
+                                    )}
+                                    {pendingData?.rows.map((r) => (
+                                        <tr key={r.id} className="border-t border-border hover:bg-muted/30 transition-colors text-[12.5px]">
+                                            <td className="px-2 py-3 text-muted-foreground whitespace-nowrap">{r.date}</td>
+                                            <td className="px-2 py-3 font-semibold text-primary truncate max-w-[120px]" title={r.po_number}>{r.po_number}</td>
+                                            <td className="px-2 py-3 text-muted-foreground truncate max-w-[120px]" title={r.client_name}>{r.client_name}</td>
+                                            <td className="px-2 py-3 text-muted-foreground truncate max-w-[140px]" title={r.item}>{r.item}</td>
+                                            <td className="px-2 py-3 text-right font-medium">{inr(r.subtotal)}</td>
+                                            <td className="px-2 py-3 text-right font-medium text-blue-500">{inr(r.gst_amount)}</td>
+                                            <td className="px-2 py-3 text-right font-bold">{inr(r.total_value)}</td>
+                                            <td className="px-2 py-3 text-[10px] uppercase font-bold">{r.status}</td>
+                                        </tr>
+                                    ))}
+                                    {!pendingLoading && pendingData?.rows.length === 0 && (
+                                        <tr><td colSpan={8} className="px-5 py-12 text-center text-muted-foreground">No pending POs found.</td></tr>
                                     )}
                                 </tbody>
                             </table>

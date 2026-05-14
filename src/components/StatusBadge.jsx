@@ -5,7 +5,7 @@ const map = {
     Delivered: "bg-success/15 text-success border-success/30",
     InStock: "bg-success/15 text-success border-success/30",
     Pending: "bg-warning/15 text-warning border-warning/30",
-    "Not Delivered": "bg-warning/15 text-warning border-warning/30",
+    "Not Delivered": "bg-destructive/15 text-destructive border-destructive/30",
     Low: "bg-warning/15 text-warning border-warning/30",
     Partial: "bg-primary/10 text-primary border-primary/20",
     Out: "bg-destructive/15 text-destructive border-destructive/30",

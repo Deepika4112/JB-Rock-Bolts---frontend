@@ -25,7 +25,7 @@ const generatePONumber = () => {
     return `PO-${datePart}-${timePart}`;
 };
 
-const emptyLineItem = () => ({ item: "", quantity: 0, uom: "Nos", unit_price: 0 });
+const emptyLineItem = () => ({ item: "", quantity: "", uom: "Nos", unit_price: "", gst: "0", freight: "" });
 
 const empty = () => ({
     clientName: "", clientDropdown: "",
@@ -115,8 +115,8 @@ const PurchaseOrders = () => {
         markOpenedMutation.mutate(o.id);
         setEditingId(o.id);
         const li = (o.line_items && o.line_items.length > 0)
-            ? o.line_items.map(l => ({ item: l.item, quantity: l.quantity, uom: l.uom, unit_price: l.unit_price }))
-            : [{ item: o.item || "", quantity: o.total_quantity, uom: o.uom || "Nos", unit_price: o.unit_price }];
+            ? o.line_items.map(l => ({ id: l.id, item: l.item, quantity: l.quantity, uom: l.uom, unit_price: l.unit_price ? Number(l.unit_price).toFixed(2) : "", gst: l.gst || "0", freight: l.freight || "" }))
+            : [{ item: o.item || "", quantity: o.total_quantity, uom: o.uom || "Nos", unit_price: o.unit_price ? Number(o.unit_price).toFixed(2) : "", gst: o.gst || "0", freight: "" }];
         setForm({
             clientName: "", clientDropdown: o.client_name,
             poNumber: o.po_number,
@@ -186,9 +186,29 @@ const PurchaseOrders = () => {
     };
 
     const subtotal = (form.lineItems || []).reduce((s, li) => s + (Number(li.quantity) || 0) * (Number(li.unit_price) || 0), 0);
-    const gstPercent = parseFloat((form.gst || "0").toString().replace("%", "")) || 0;
-    const gstAmount = Math.round(subtotal * gstPercent / 100);
-    const grandTotal = subtotal + gstAmount + (Number(form.freight) || 0);
+    
+    let isGlobalGstAmount = (form.gst || "").toString().startsWith("₹");
+    let globalGstAmount = 0;
+    if (isGlobalGstAmount) {
+        globalGstAmount = parseFloat(form.gst.toString().replace("₹", "").replace(/,/g, "")) || 0;
+    } else if (form.gst && form.gst !== "") {
+        const gstPercent = parseFloat((form.gst || "0").toString().replace("%", "")) || 0;
+        globalGstAmount = subtotal * gstPercent / 100;
+    }
+
+    const itemsGstAmount = (form.lineItems || []).reduce((s, li) => {
+        const lineSub = (Number(li.quantity) || 0) * (Number(li.unit_price) || 0);
+        if ((li.gst || "").toString().startsWith("₹")) {
+            return s + (parseFloat(li.gst.toString().replace("₹", "").replace(/,/g, "")) || 0);
+        } else {
+            const pct = parseFloat((li.gst || "18").toString().replace("%", "")) || 0;
+            return s + (lineSub * pct / 100);
+        }
+    }, 0);
+
+    const gstAmount = form.gst ? globalGstAmount : itemsGstAmount;
+    const itemsFreight = (form.lineItems || []).reduce((s, li) => s + (Number(li.freight) || 0), 0);
+    const grandTotal = subtotal + gstAmount + (Number(form.freight) || 0) + itemsFreight;
 
     const handleFileUpload = async (e) => {
         const file = e.target.files[0];
@@ -244,16 +264,19 @@ const PurchaseOrders = () => {
             client_name: effectiveClient,
             po_number: form.poNumber,
             project: form.project || null,
-            gst: form.gst || null,
+            gst: form.gst || "0",
             freight: Number(form.freight) || 0,
             payment_terms: form.paymentTerms || null,
             validity_date: form.validityDate ? new Date(form.validityDate).toISOString() : null,
             file_url: form.fileUrl || null,
             line_items: (form.lineItems || []).map(li => ({
+                id: li.id || null,
                 item: li.item.trim(),
                 quantity: Number(li.quantity) || 0,
                 uom: li.uom || "Nos",
-                unit_price: Number(li.unit_price) || 0
+                unit_price: Number(li.unit_price) || 0,
+                gst: li.gst || "0",
+                freight: Number(li.freight) || 0
             })).filter(li => li.item)
         };
         try {
@@ -434,6 +457,66 @@ const PurchaseOrders = () => {
                                                     />
                                                 </div>
                                             </div>
+                                            <div className="grid grid-cols-1 sm:grid-cols-4 gap-4 mt-4 pt-4 border-t border-slate-200">
+                                                <div className="space-y-1.5">
+                                                    <Label className="text-[11px] uppercase tracking-wider text-muted-foreground">GST</Label>
+                                                    <div className="flex gap-1">
+                                                        <Input 
+                                                            placeholder="18" 
+                                                            value={(li.gst || "").replace("₹", "")} 
+                                                            onChange={(e) => {
+                                                                const val = e.target.value;
+                                                                if ((li.gst || "").toString().startsWith("₹")) {
+                                                                    if (/^\d*\.?\d*$/.test(val)) setLineItem(idx, "gst", `₹${val}`);
+                                                                } else {
+                                                                    if (/^\d{0,2}%?$/.test(val)) setLineItem(idx, "gst", val);
+                                                                }
+                                                            }} 
+                                                        />
+                                                        <Select value={(li.gst || "").toString().startsWith("₹") ? "amount" : "percent"} onValueChange={(v) => {
+                                                            if (v === "amount") {
+                                                                setLineItem(idx, "gst", `₹${(li.gst || "18").replace("₹", "").replace("%", "")}`);
+                                                            } else {
+                                                                setLineItem(idx, "gst", (li.gst || "18").replace("₹", "").replace("%", ""));
+                                                            }
+                                                        }}>
+                                                            <SelectTrigger className="w-20"><SelectValue /></SelectTrigger>
+                                                            <SelectContent>
+                                                                <SelectItem value="percent">%</SelectItem>
+                                                                <SelectItem value="amount">₹</SelectItem>
+                                                            </SelectContent>
+                                                        </Select>
+                                                    </div>
+                                                </div>
+                                                <div className="space-y-1.5">
+                                                    <Label className="text-[11px] uppercase tracking-wider text-muted-foreground">Freight</Label>
+                                                    <Input 
+                                                        type="number" 
+                                                        min="0" 
+                                                        placeholder="0.00" 
+                                                        value={li.freight || ""} 
+                                                        onChange={(e) => setLineItem(idx, "freight", e.target.value)} 
+                                                    />
+                                                </div>
+                                                <div className="sm:col-span-2 flex items-end justify-end space-x-6">
+                                                    <div className="text-right">
+                                                        <div className="text-[10px] uppercase text-muted-foreground font-semibold">Subtotal</div>
+                                                        <div className="font-medium text-sm">{inr((li.quantity || 0) * (li.unit_price || 0))}</div>
+                                                    </div>
+                                                    <div className="text-right">
+                                                        <div className="text-[10px] uppercase text-muted-foreground font-semibold">Row Total</div>
+                                                        <div className="font-bold text-base text-green-700">
+                                                            {inr(
+                                                                ((li.quantity || 0) * (li.unit_price || 0)) + 
+                                                                Number(li.freight || 0) + 
+                                                                ((li.gst || "").toString().startsWith("₹") 
+                                                                    ? Number((li.gst || "").toString().replace("₹", "") || 0) 
+                                                                    : ((li.quantity || 0) * (li.unit_price || 0) * Number(li.gst || 18) / 100))
+                                                            )}
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            </div>
 
 
                                         </div>
@@ -441,21 +524,67 @@ const PurchaseOrders = () => {
                                 </div>
                             </div>
 
-                            <div className="space-y-2">
-                                <Label>GST % (Manual)</Label>
-                                <Input type="text" placeholder="e.g. 18" value={form.gst || ""}
-                                    onChange={(e) => { const val = e.target.value; if (/^\d{0,2}%?$/.test(val)) set("gst", val); }} />
+                            {/* Inline Financial Summary Bar */}
+                            <div className="sm:col-span-2 mt-4 p-3 rounded-lg bg-slate-100 border border-slate-200 flex flex-wrap items-center justify-between gap-4">
+                                <div className="flex items-center gap-6">
+                                    <div className="flex items-center gap-2">
+                                        <span className="text-sm font-medium text-slate-600">Subtotal:</span>
+                                        <span className="text-sm font-bold text-slate-900">{inr(subtotal)}</span>
+                                    </div>
+                                    <div className="flex items-center gap-1.5">
+                                        <span className="text-sm font-medium text-slate-600">GST:</span>
+                                        <div className="flex items-center rounded-md border border-slate-300 bg-white h-8 overflow-hidden shadow-sm">
+                                            <select 
+                                                className="bg-slate-100 border-r border-slate-300 px-1.5 py-1 h-full text-xs font-bold text-slate-700 outline-none cursor-pointer"
+                                                value={isGlobalGstAmount ? "amount" : "percent"}
+                                                onChange={(e) => {
+                                                    if (e.target.value === "amount") {
+                                                        set("gst", `₹${globalGstAmount || 0}`);
+                                                    } else {
+                                                        set("gst", "18");
+                                                    }
+                                                }}
+                                            >
+                                                <option value="percent">%</option>
+                                                <option value="amount">₹</option>
+                                            </select>
+                                            <input 
+                                                type="text" 
+                                                className="w-16 h-full px-2 text-right font-bold text-slate-900 outline-none"
+                                                value={isGlobalGstAmount ? (form.gst?.toString().replace("₹", "") || "") : (form.gst || "")}
+                                                onChange={(e) => {
+                                                    const val = e.target.value;
+                                                    if (isGlobalGstAmount) {
+                                                        if (/^\d*\.?\d*$/.test(val)) set("gst", `₹${val}`);
+                                                    } else {
+                                                        if (/^\d{0,2}%?$/.test(val)) set("gst", val);
+                                                    }
+                                                }}
+                                            />
+                                        </div>
+                                        {!isGlobalGstAmount && <span className="text-sm font-bold text-slate-900 ml-1">({inr(globalGstAmount)})</span>}
+                                    </div>
+                                    <div className="flex items-center gap-2">
+                                        <span className="text-sm font-medium text-slate-600">Freight:</span>
+                                        <Input 
+                                            type="number" 
+                                            min="0" 
+                                            value={form.freight || ""} 
+                                            onChange={(e) => set("freight", e.target.value)} 
+                                            className="h-8 w-24 text-right bg-white border-slate-300 font-bold"
+                                        />
+                                    </div>
+                                </div>
+                                <div className="flex items-center gap-2 bg-primary/10 px-3 py-1.5 rounded-md border border-primary/20">
+                                    <span className="text-xs font-bold text-primary uppercase tracking-wider">Grand Total:</span>
+                                    <span className="text-base font-black text-primary">{inr(grandTotal)}</span>
+                                </div>
                             </div>
 
-                            <div className="space-y-2">
-                                <Label>Freight (INR)</Label>
-                                <Input type="number" min="0" value={form.freight || ""} onChange={(e) => set("freight", e.target.value)} />
-                            </div>
-
-                            <div className="space-y-2">
-                                <Label>Payment Terms</Label>
+                            <div className="space-y-2 sm:col-span-1">
+                                <Label className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest">Payment Terms</Label>
                                 <Select value={form.paymentTerms} onValueChange={(v) => set("paymentTerms", v)}>
-                                    <SelectTrigger><SelectValue placeholder="Select terms" /></SelectTrigger>
+                                    <SelectTrigger className="h-8"><SelectValue placeholder="Select terms" /></SelectTrigger>
                                     <SelectContent>
                                         {payment_terms.map((t) => <SelectItem key={t} value={t}>{t}</SelectItem>)}
                                     </SelectContent>
@@ -566,10 +695,23 @@ const PurchaseOrders = () => {
                                         </td>
                                         <td className="px-1.5 py-3 font-medium text-foreground whitespace-nowrap text-xs">{o.po_number}</td>
                                         <td className="px-1.5 py-3 text-right font-semibold whitespace-nowrap">{o.total_quantity} <span className="text-[10px] font-normal text-muted-foreground">{o.uom || "Nos"}</span></td>
-                                        <td className="px-1.5 py-3 text-right text-success font-bold">{o.delivered_quantity}</td>
-                                        <td className="px-1.5 py-3 text-right text-warning font-bold">{o.pending_quantity}</td>
+                                        <td className="px-1.5 py-3 text-right text-success font-bold whitespace-nowrap">{o.delivered_quantity} <span className="text-[10px] font-normal text-muted-foreground">{o.uom || "Nos"}</span></td>
+                                        <td className="px-1.5 py-3 text-right text-warning font-bold whitespace-nowrap">{o.pending_quantity} <span className="text-[10px] font-normal text-muted-foreground">{o.uom || "Nos"}</span></td>
                                         <td className="px-1.5 py-3 text-muted-foreground whitespace-nowrap text-xs">{o.validity_date ? fmtDate(o.validity_date) : "—"}</td>
-                                        <td className="px-1.5 py-3 scale-90 origin-left -mr-4"><StatusBadge status={o.delivery_status} label={o.delivery_status} /></td>
+                                        <td className="px-1.5 py-3 scale-90 origin-left -mr-4">
+                                            <StatusBadge 
+                                                status={
+                                                    (o.delivery_status === "Delivered" && o.all_dispatches_marked) ? "Delivered" :
+                                                    (o.delivery_status === "Delivered" || o.delivery_status === "Partial") ? "Partial" :
+                                                    "Not Delivered"
+                                                } 
+                                                label={
+                                                    (o.delivery_status === "Delivered" && o.all_dispatches_marked) ? "Delivered" :
+                                                    o.delivery_status === "Delivered" ? "Dispatched (Pending Challans)" :
+                                                    o.delivery_status
+                                                } 
+                                            />
+                                        </td>
                                         <td className="px-1.5 py-3">
                                             <div className="text-[11px] leading-tight">
                                                 <div className="font-bold text-foreground truncate max-w-[70px]">{lastBy}</div>
@@ -613,12 +755,27 @@ const PurchaseOrders = () => {
             </Card>
 
             <Dialog open={!!viewing} onOpenChange={(o) => !o && setViewing(null)}>
-                <DialogContent className="max-w-2xl">
+                <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
                     <DialogHeader><DialogTitle>Purchase Order Details</DialogTitle></DialogHeader>
                     {viewing && (
                         <div className="space-y-4">
                             <div className="grid grid-cols-2 gap-3 text-sm">
                                 <Field label="PO Number" value={viewing.po_number} />
+                                <div className="space-y-1">
+                                    <div className="text-[11px] uppercase tracking-wider text-muted-foreground">Delivery Status</div>
+                                    <StatusBadge 
+                                        status={
+                                            (viewing.delivery_status === "Delivered" && viewing.all_dispatches_marked) ? "Delivered" :
+                                            (viewing.delivery_status === "Delivered" || viewing.delivery_status === "Partial") ? "Partial" :
+                                            "Not Delivered"
+                                        } 
+                                        label={
+                                            (viewing.delivery_status === "Delivered" && viewing.all_dispatches_marked) ? "Delivered" :
+                                            viewing.delivery_status === "Delivered" ? "Dispatched (Pending Challans)" :
+                                            viewing.delivery_status
+                                        } 
+                                    />
+                                </div>
                                 <Field label="Client" value={viewing.client_name} />
                                 <Field label="Project" value={viewing.project} />
                                 <Field label="Payment Terms" value={viewing.payment_terms} />
@@ -634,7 +791,7 @@ const PurchaseOrders = () => {
                                     </div>
                                 )}
                             </div>
-                            <div className="rounded-lg border border-border overflow-hidden">
+                            <div className="rounded-lg border border-border overflow-x-auto">
                                 <div className="bg-muted/50 px-3 py-2 text-xs font-semibold text-muted-foreground uppercase tracking-wider">Items</div>
                                 <table className="w-full text-sm">
                                     <thead className="bg-muted/30">

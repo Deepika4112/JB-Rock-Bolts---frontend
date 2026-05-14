@@ -3,7 +3,7 @@ import { fetchConstants } from "@/lib/api";
 
 const FALLBACK = {
     products: [],
-    uom_options: ["Nos", "MT", "Kg", "Ton", "Set", "Meter", "Sqm", "Cum", "Ltr", "Box", "Unit", "ZNS"],
+    uom_options: ["Nos", "MT", "Kg", "Ton", "Set", "Meter", "Sqm", "Cum", "Ltr", "Box", "Unit", "ZNS", "PC"],
     clients: [],
     locations: [],
     projects: [],
@@ -17,8 +17,8 @@ export function useConstants() {
     const { data } = useQuery({
         queryKey: ["constants"],
         queryFn: fetchConstants,
-        staleTime: Infinity,
-        gcTime: Infinity,
+        staleTime: 1000 * 60 * 5,
+        gcTime: 1000 * 60 * 30,
     });
     return data || FALLBACK;
 }
