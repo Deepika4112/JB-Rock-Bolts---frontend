@@ -1,14 +1,18 @@
 const BASE = import.meta.env.VITE_API_URL || "http://127.0.0.1:8000";
 
+const getToken = () => localStorage.getItem("auth_token");
+
 async function request(path, options = {}) {
     const url = `${BASE}${path.startsWith("/") ? "" : "/"}${path}`;
+    const token = getToken();
     try {
         const res = await fetch(url, {
             mode: "cors",
-            headers: { 
+            headers: {
                 "Content-Type": "application/json",
                 "Accept": "application/json",
-                ...options.headers 
+                ...(token ? { "Authorization": `Bearer ${token}` } : {}),
+                ...options.headers
             },
             ...options,
         });

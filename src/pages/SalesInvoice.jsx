@@ -1111,7 +1111,7 @@ const SalesInvoice = () => {
                                         <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
                                             <div className="space-y-1">
                                                 <Label>Rate (Rate)</Label>
-                                                <Input type="number" value={manualUnitPrice} onChange={e => setManualUnitPrice(e.target.value)} />
+                                                <Input type="number" step="0.01" min="0" value={manualUnitPrice} onChange={e => setManualUnitPrice(e.target.value)} />
                                             </div>
                                             <div className="space-y-1">
                                                 <Label>GST %</Label>
@@ -1313,7 +1313,7 @@ const SalesInvoice = () => {
                                                                 <Input type="number" className="h-8 text-xs text-center bg-background" value={item.quantity} onChange={e => updateEditItem(idx, "quantity", e.target.value)} />
                                                             </td>
                                                             <td className="p-2 text-right">
-                                                                <Input type="number" className="h-8 text-xs text-right bg-background" value={item.unit_price} onChange={e => updateEditItem(idx, "unit_price", e.target.value)} />
+                                                                <Input type="number" step="0.01" min="0" className="h-8 text-xs text-right bg-background" value={item.unit_price} onChange={e => updateEditItem(idx, "unit_price", e.target.value)} />
                                                             </td>
                                                             <td className="p-2 text-right">
                                                                 <Input type="number" className="h-8 text-xs text-right bg-background" value={item.gst_rate} onChange={e => updateEditItem(idx, "gst_rate", e.target.value)} />

@@ -448,12 +448,13 @@ const PurchaseOrders = () => {
                                                 </div>
                                                 <div className="space-y-1.5">
                                                     <Label className="text-[11px] uppercase tracking-wider text-muted-foreground">Unit Price</Label>
-                                                    <Input 
-                                                        type="number" 
-                                                        min="0" 
-                                                        placeholder="0.00" 
-                                                        value={li.unit_price || ""} 
-                                                        onChange={(e) => setLineItem(idx, "unit_price", e.target.value)} 
+                                                    <Input
+                                                        type="number"
+                                                        min="0"
+                                                        step="0.01"
+                                                        placeholder="0.00"
+                                                        value={li.unit_price || ""}
+                                                        onChange={(e) => setLineItem(idx, "unit_price", e.target.value)}
                                                     />
                                                 </div>
                                             </div>
@@ -490,12 +491,13 @@ const PurchaseOrders = () => {
                                                 </div>
                                                 <div className="space-y-1.5">
                                                     <Label className="text-[11px] uppercase tracking-wider text-muted-foreground">Freight</Label>
-                                                    <Input 
-                                                        type="number" 
-                                                        min="0" 
-                                                        placeholder="0.00" 
-                                                        value={li.freight || ""} 
-                                                        onChange={(e) => setLineItem(idx, "freight", e.target.value)} 
+                                                    <Input
+                                                        type="number"
+                                                        min="0"
+                                                        step="0.01"
+                                                        placeholder="0.00"
+                                                        value={li.freight || ""}
+                                                        onChange={(e) => setLineItem(idx, "freight", e.target.value)}
                                                     />
                                                 </div>
                                                 <div className="sm:col-span-2 flex items-end justify-end space-x-6">

@@ -1,9 +1,9 @@
-import { Bell, Menu, Moon, Search, Sun, UserCog } from "lucide-react";
+import { Bell, LogOut, Menu, Moon, Search, Sun } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useTheme } from "@/context/ThemeContext";
-import { getCurrentUser, setCurrentUser } from "@/lib/currentUser";
-import { useEffect, useState } from "react";
+import { useAuth } from "@/context/AuthContext";
+import { useNavigate } from "react-router-dom";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { fetchLogs } from "@/lib/api";
 import { useQuery } from "@tanstack/react-query";
@@ -11,27 +11,23 @@ import { formatDistanceToNow } from "date-fns";
 
 export const Topbar = ({ onMenu }) => {
     const { theme, toggle } = useTheme();
-    const [user, setUser] = useState("Admin User");
+    const { user, logout } = useAuth();
+    const navigate = useNavigate();
 
-    useEffect(() => {
-        setUser(getCurrentUser());
-    }, []);
+    const displayName = user?.name || "Admin User";
 
     const { data: logs = [] } = useQuery({
         queryKey: ["system_logs"],
         queryFn: () => fetchLogs(20),
-        refetchInterval: 10000, // Refetch every 10 seconds
+        refetchInterval: 10000,
     });
 
-    const changeUser = () => {
-        const next = window.prompt("Enter your name (used for activity log):", user);
-        if (next) {
-            setCurrentUser(next);
-            setUser(next);
-        }
+    const handleLogout = () => {
+        logout();
+        navigate("/login", { replace: true });
     };
 
-    const initials = user
+    const initials = displayName
         .split(" ")
         .map((n) => n[0])
         .filter(Boolean)
@@ -48,7 +44,7 @@ export const Topbar = ({ onMenu }) => {
 
                 <div className="hidden md:flex flex-col leading-tight mr-4">
                     <h1 className="font-bold text-base text-foreground">JB Rock Bolts Dashboard</h1>
-                    <p className="text-[11px] text-muted-foreground">Marketing & Sales Management System</p>
+                    <p className="text-[11px] text-muted-foreground">Marketing &amp; Sales Management System</p>
                 </div>
 
                 <div className="flex-1 max-w-md ml-auto md:ml-0">
@@ -91,7 +87,7 @@ export const Topbar = ({ onMenu }) => {
                                                 <span className="text-[10px] text-muted-foreground">{formatDistanceToNow(new Date(log.created_at), { addSuffix: true })}</span>
                                             </div>
                                             <p className="text-xs text-muted-foreground line-clamp-2">{log.details}</p>
-                                            <div className="text-[10px] text-muted-foreground mt-1">By: <span className="font-medium text-foreground">{log.user || 'System'}</span></div>
+                                            <div className="text-[10px] text-muted-foreground mt-1">By: <span className="font-medium text-foreground">{log.user || "System"}</span></div>
                                         </div>
                                     ))}
                                 </div>
@@ -100,22 +96,25 @@ export const Topbar = ({ onMenu }) => {
                     </PopoverContent>
                 </Popover>
 
-                <button
-                    onClick={changeUser}
-                    className="flex items-center gap-3 pl-3 border-l border-border hover:opacity-80 transition-opacity"
-                    title="Change active user"
-                >
+                {/* User info + logout */}
+                <div className="flex items-center gap-2 pl-3 border-l border-border">
                     <div className="hidden sm:block text-right leading-tight">
-                        <div className="text-sm font-semibold text-foreground flex items-center gap-1.5 justify-end">
-                            {user}
-                            <UserCog className="h-3.5 w-3.5 text-muted-foreground" />
-                        </div>
-                        <div className="text-[11px] text-muted-foreground">Active User</div>
+                        <div className="text-sm font-semibold text-foreground">{displayName}</div>
+                        <div className="text-[11px] text-muted-foreground">{user?.email || "Active User"}</div>
                     </div>
-                    <div className="h-9 w-9 rounded-full bg-gradient-primary grid place-items-center text-primary-foreground font-semibold text-sm">
+                    <div className="h-9 w-9 rounded-full bg-gradient-primary grid place-items-center text-primary-foreground font-semibold text-sm shrink-0">
                         {initials}
                     </div>
-                </button>
+                    <Button
+                        variant="ghost"
+                        size="icon"
+                        onClick={handleLogout}
+                        title="Sign out"
+                        className="text-muted-foreground hover:text-destructive"
+                    >
+                        <LogOut className="h-4 w-4" />
+                    </Button>
+                </div>
             </div>
         </header>
     );
