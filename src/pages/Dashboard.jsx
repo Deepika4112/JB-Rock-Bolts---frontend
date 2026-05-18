@@ -40,7 +40,7 @@ const Dashboard = () => {
     const navigate = useNavigate();
     const { data: stats } = useQuery({ queryKey: ["dashboard-stats"], queryFn: fetchDashboardStats });
     const { data: charts } = useQuery({ queryKey: ["dashboard-charts"], queryFn: fetchDashboardCharts });
-    const { data: recent = [] } = useQuery({ queryKey: ["recent-sales"], queryFn: () => fetchRecentSales(6) });
+    const { data: recent = [] } = useQuery({ queryKey: ["recent-sales"], queryFn: () => fetchRecentSales(100) });
 
     const paymentPie = (charts?.payment_status || []).map((p) => ({
         ...p,
@@ -123,29 +123,35 @@ const Dashboard = () => {
                 <div className="px-5 py-4 border-b border-border">
                     <h3 className="font-semibold text-foreground">Recent Sales</h3>
                 </div>
-                <div className="overflow-x-auto">
+                <div className="overflow-x-auto overflow-y-auto max-h-[450px]">
                     <table className="w-full text-sm">
-                        <thead className="bg-muted/50 text-muted-foreground">
+                        <thead className="bg-muted/50 text-muted-foreground sticky top-0 z-10 shadow-sm">
                             <tr>
-                                <th className="text-left font-medium px-5 py-3">Client</th>
-                                <th className="text-left font-medium px-5 py-3">Product</th>
-                                <th className="text-right font-medium px-5 py-3">Price</th>
-                                <th className="text-left font-medium px-5 py-3">Payment</th>
-                                <th className="text-left font-medium px-5 py-3">Delivery</th>
+                                <th className="text-left font-medium px-5 py-3 bg-muted/50 w-[60px]">S.No.</th>
+                                <th className="text-left font-medium px-5 py-3 bg-muted/50">Client</th>
+                                <th className="text-left font-medium px-5 py-3 bg-muted/50">Product</th>
+                                <th className="text-right font-medium px-5 py-3 bg-muted/50">Price</th>
+                                <th className="text-left font-medium px-5 py-3 bg-muted/50">Payment</th>
+                                <th className="text-left font-medium px-5 py-3 bg-muted/50">Delivery</th>
                             </tr>
                         </thead>
                         <tbody>
-                            {recent.map((r) => (
-                                <tr key={r.id} className="border-t border-border hover:bg-muted/30">
-                                    <td className="px-5 py-3 font-medium text-foreground">{r.client_name}</td>
-                                    <td className="px-5 py-3 text-muted-foreground">{r.product}</td>
-                                    <td className="px-5 py-3 text-right font-semibold">{inr(r.price)}</td>
+                            {recent.map((r, index) => (
+                                <tr key={r.id || index} className="border-t border-border hover:bg-muted/30 transition-colors">
+                                    <td className="px-5 py-3 text-muted-foreground font-medium">{index + 1}</td>
+                                    <td className="px-5 py-3 font-medium text-foreground">
+                                        <div className="max-w-[200px] truncate" title={r.client_name}>{r.client_name}</div>
+                                    </td>
+                                    <td className="px-5 py-3 text-muted-foreground">
+                                        <div className="max-w-[350px] truncate" title={r.product}>{r.product}</div>
+                                    </td>
+                                    <td className="px-5 py-3 text-right font-semibold whitespace-nowrap">{inr(r.price)}</td>
                                     <td className="px-5 py-3"><StatusBadge status={r.payment_status} /></td>
                                     <td className="px-5 py-3"><StatusBadge status={r.delivery_status} /></td>
                                 </tr>
                             ))}
                             {recent.length === 0 && (
-                                <tr><td colSpan={5} className="px-5 py-12 text-center text-muted-foreground">No sales data yet.</td></tr>
+                                <tr><td colSpan={6} className="px-5 py-12 text-center text-muted-foreground">No sales data yet.</td></tr>
                             )}
                         </tbody>
                     </table>

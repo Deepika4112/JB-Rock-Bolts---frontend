@@ -126,6 +126,7 @@ export const loginUser = (body) => post("/api/users/login", body);
 export const registerUser = (body) => post("/api/users/register", body);
 export const fetchUsers = () => get("/api/users");
 export const updateUser = (id, body) => put(`/api/users/${id}`, body);
+export const resetPassword = (body) => post("/api/users/reset-password", body);
 
 // ── Logs ─────────────────────────────────────────────────────────────────────
 export const fetchLogs = (limit = 50) => get("/api/logs", { limit });

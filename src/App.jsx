@@ -14,6 +14,7 @@ import Clients from "./pages/Clients";
 import Reports from "./pages/Reports";
 import Login from "./pages/Login";
 import Register from "./pages/Register";
+import ForgotPassword from "./pages/ForgotPassword";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient({
@@ -50,6 +51,7 @@ const App = () => (
                             {/* Auth routes — only accessible when NOT logged in */}
                             <Route path="/login" element={<GuestRoute><Login /></GuestRoute>} />
                             <Route path="/register" element={<GuestRoute><Register /></GuestRoute>} />
+                            <Route path="/forgot-password" element={<GuestRoute><ForgotPassword /></GuestRoute>} />
 
                             {/* Protected app routes */}
                             <Route path="/" element={<ProtectedRoute><AppLayout><Dashboard /></AppLayout></ProtectedRoute>} />

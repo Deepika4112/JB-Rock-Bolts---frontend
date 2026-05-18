@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { Bell, LogOut, Menu, Moon, Search, Sun } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -13,6 +14,7 @@ export const Topbar = ({ onMenu }) => {
     const { theme, toggle } = useTheme();
     const { user, logout } = useAuth();
     const navigate = useNavigate();
+    const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
 
     const displayName = user?.name || "Admin User";
 
@@ -37,6 +39,34 @@ export const Topbar = ({ onMenu }) => {
 
     return (
         <header className="sticky top-0 z-30 bg-card/80 backdrop-blur-md border-b border-border">
+            {/* Custom Safe Logout Modal */}
+            {showLogoutConfirm && (
+                <div className="fixed inset-0 z-[100] flex items-start justify-center pt-32 bg-background/80 backdrop-blur-sm">
+                    <div className="w-[90%] max-w-sm rounded-xl border border-border bg-card p-6 shadow-2xl">
+                        <h3 className="text-lg font-bold text-foreground">Confirm Logout</h3>
+                        <p className="mt-2 text-sm text-muted-foreground leading-relaxed">
+                            Are you sure you want to logout?
+                        </p>
+                        <div className="mt-6 flex flex-col sm:flex-row gap-3">
+                            <Button 
+                                variant="outline" 
+                                className="flex-1" 
+                                onClick={() => setShowLogoutConfirm(false)}
+                            >
+                                Cancel
+                            </Button>
+                            <Button 
+                                variant="destructive" 
+                                className="flex-1 shadow-sm font-semibold" 
+                                onClick={handleLogout}
+                            >
+                                Logout
+                            </Button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
             <div className="flex h-16 items-center gap-3 px-4 sm:px-6">
                 <Button variant="ghost" size="icon" className="lg:hidden" onClick={onMenu}>
                     <Menu className="h-5 w-5" />
@@ -96,7 +126,6 @@ export const Topbar = ({ onMenu }) => {
                     </PopoverContent>
                 </Popover>
 
-                {/* User info + logout */}
                 <div className="flex items-center gap-2 pl-3 border-l border-border">
                     <div className="hidden sm:block text-right leading-tight">
                         <div className="text-sm font-semibold text-foreground">{displayName}</div>
@@ -106,13 +135,13 @@ export const Topbar = ({ onMenu }) => {
                         {initials}
                     </div>
                     <Button
-                        variant="ghost"
-                        size="icon"
-                        onClick={handleLogout}
+                        variant="outline"
+                        onClick={() => setShowLogoutConfirm(true)}
                         title="Sign out"
-                        className="text-muted-foreground hover:text-destructive"
+                        className="border-destructive/30 text-destructive hover:bg-destructive hover:text-white flex items-center gap-2 px-3 h-9 rounded-md transition-all shadow-sm ml-2 font-bold"
                     >
                         <LogOut className="h-4 w-4" />
+                        <span className="hidden md:inline text-sm font-medium">Logout</span>
                     </Button>
                 </div>
             </div>
