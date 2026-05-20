@@ -88,7 +88,7 @@ export default function Login() {
                                     required
                                     value={email}
                                     onChange={(e) => setEmail(e.target.value)}
-                                    placeholder="admin@jbrockbolts.com"
+                                    placeholder="Enter your email"
                                     className="w-full h-11 pl-10 pr-4 rounded-lg border border-input bg-background text-foreground text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:border-transparent transition"
                                 />
                             </div>
@@ -111,7 +111,7 @@ export default function Login() {
                                 <input
                                     id="password"
                                     type={showPassword ? "text" : "password"}
-                                    autoComplete="current-password"
+                                    autoComplete="new-password"
                                     required
                                     value={password}
                                     onChange={(e) => setPassword(e.target.value)}
@@ -150,9 +150,7 @@ export default function Login() {
                         </Link>
                     </p>
 
-                    <p className="mt-8 text-center text-[11px] text-muted-foreground/60">
-                        Default: admin@jbrockbolts.com / admin@123
-                    </p>
+
                 </div>
             </div>
         </div>

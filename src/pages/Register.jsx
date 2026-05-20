@@ -1,8 +1,8 @@
 import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { Eye, EyeOff, UserPlus, Lock, Mail, User } from "lucide-react";
-import { useAuth } from "@/context/AuthContext";
-import { registerUser, loginUser } from "@/lib/api";
+
+import { registerUser } from "@/lib/api";
 import { useToast } from "@/hooks/use-toast";
 
 export default function Register() {
@@ -12,7 +12,7 @@ export default function Register() {
     const [confirm, setConfirm] = useState("");
     const [showPassword, setShowPassword] = useState(false);
     const [loading, setLoading] = useState(false);
-    const { login } = useAuth();
+
     const navigate = useNavigate();
     const { toast } = useToast();
 
@@ -33,11 +33,8 @@ export default function Register() {
         setLoading(true);
         try {
             await registerUser({ name, email, password });
-            // Auto-login after successful registration
-            const data = await loginUser({ email, password });
-            login(data);
-            toast({ title: "Account created!", description: `Welcome, ${name}` });
-            navigate("/", { replace: true });
+            toast({ title: "Account created!", description: "Please log in with your credentials." });
+            navigate("/login", { replace: true });
         } catch (err) {
             toast({ title: "Registration failed", description: err.message, variant: "destructive" });
         } finally {

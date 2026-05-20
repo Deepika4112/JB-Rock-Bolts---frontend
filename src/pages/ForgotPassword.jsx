@@ -71,7 +71,7 @@ export default function ForgotPassword() {
                     <p className="mt-1.5 text-sm text-muted-foreground">Enter your account email and a new password</p>
                 </div>
 
-                <form onSubmit={handleSubmit} className="space-y-5">
+                <form onSubmit={handleSubmit} autoComplete="off" className="space-y-5">
                     <div className="space-y-1.5">
                         <label className="text-sm font-medium text-foreground" htmlFor="email">
                             Email address
@@ -83,8 +83,9 @@ export default function ForgotPassword() {
                                 type="email"
                                 required
                                 value={email}
+                                autoComplete="off"
                                 onChange={(e) => setEmail(e.target.value)}
-                                placeholder="admin@jbrockbolts.com"
+                                placeholder="Enter your email"
                                 className="w-full h-11 pl-10 pr-4 rounded-lg border border-input bg-background text-foreground text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:border-transparent transition"
                             />
                         </div>
@@ -101,6 +102,7 @@ export default function ForgotPassword() {
                                 type="password"
                                 required
                                 value={password}
+                                autoComplete="new-password"
                                 onChange={(e) => setPassword(e.target.value)}
                                 placeholder="••••••••"
                                 className="w-full h-11 pl-10 pr-4 rounded-lg border border-input bg-background text-foreground text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:border-transparent transition"
@@ -119,6 +121,7 @@ export default function ForgotPassword() {
                                 type="password"
                                 required
                                 value={confirmPassword}
+                                autoComplete="new-password"
                                 onChange={(e) => setConfirmPassword(e.target.value)}
                                 placeholder="••••••••"
                                 className="w-full h-11 pl-10 pr-4 rounded-lg border border-input bg-background text-foreground text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:border-transparent transition"
