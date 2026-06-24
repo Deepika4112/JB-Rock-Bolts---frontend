@@ -1,11 +1,11 @@
-import { useMemo, useState, useEffect } from "react";
-import { useLocation, useNavigate } from "react-router-dom";
+import { useMemo, useState, useRef } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useLocation, useNavigate } from "react-router-dom";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { StatusBadge } from "@/components/StatusBadge";
@@ -15,12 +15,11 @@ import { useConstants } from "@/lib/constants";
 import {
     fetchPurchaseOrders, createPurchaseOrder, updatePurchaseOrder,
     deletePurchaseOrder, fetchPurchaseOrder, openPODocument,
-    createClient, createProject, fetchProjects, uploadPOFile, shortClosePurchaseOrder
+    createClient, createProject, fetchProjects, uploadPOFile,
+    exportPurchaseOrders, importPurchaseOrders, shortClosePurchaseOrder,
 } from "@/lib/api";
-import { Pencil, Plus, Search, Trash2, Eye, FileText, Package, Truck, Clock, Printer, X, UploadCloud } from "lucide-react";
+import { Pencil, Plus, Search, Trash2, Eye, FileText, Package, Truck, Clock, Printer, X, UploadCloud, Download, Upload } from "lucide-react";
 import { toast } from "sonner";
-
-
 
 const emptyLineItem = () => ({ item: "", quantity: "", uom: "Nos", unit_price: "", gst: "0", freight: "" });
 
@@ -31,8 +30,8 @@ const empty = () => ({
     gst: "", freight: 0,
     project: "",
     paymentTerms: "",
-    remark: "",
     fileUrl: "",
+    remark: "",
     lineItems: [emptyLineItem()],
 });
 
@@ -40,6 +39,8 @@ const isoToDateInput = (iso) => (iso ? new Date(iso).toISOString().slice(0, 10) 
 
 const PurchaseOrders = () => {
     const qc = useQueryClient();
+    const location = useLocation();
+    const navigate = useNavigate();
     const { products, clients, projects, payment_terms, uom_options } = useConstants();
 
     const { data: orders = [], isLoading } = useQuery({
@@ -61,6 +62,7 @@ const PurchaseOrders = () => {
             toast.error(err.message || "Failed to delete Purchase Order");
         }
     });
+    const markOpenedMutation = useMutation({ mutationFn: (id) => fetchPurchaseOrder(id, getCurrentUser()), onSuccess: invalidate });
     const shortCloseMutation = useMutation({
         mutationFn: ({ id, body }) => shortClosePurchaseOrder(id, body),
         onSuccess: () => {
@@ -73,7 +75,6 @@ const PurchaseOrders = () => {
             toast.error(err.message || "Failed to short close Purchase Order");
         }
     });
-    const markOpenedMutation = useMutation({ mutationFn: (id) => fetchPurchaseOrder(id, getCurrentUser()), onSuccess: invalidate });
 
     const clientMutation = useMutation({ mutationFn: createClient, onSuccess: () => qc.invalidateQueries({ queryKey: ["constants"] }) });
     const projectMutation = useMutation({ mutationFn: createProject, onSuccess: () => qc.invalidateQueries({ queryKey: ["constants"] }) });
@@ -85,22 +86,44 @@ const PurchaseOrders = () => {
     const [viewing, setViewing] = useState(null);
     const [uploadingPoId, setUploadingPoId] = useState(null);
     const [itemToDelete, setItemToDelete] = useState(null);
+
     const [shortCloseItem, setShortCloseItem] = useState(null);
     const [shortCloseRemark, setShortCloseRemark] = useState("");
-    const [viewStateHandled, setViewStateHandled] = useState(false);
 
-    const navigate = useNavigate();
-    const location = useLocation();
-    const viewFromState = location.state?.viewId;
+    const [importOpen, setImportOpen] = useState(false);
+    const [importFile, setImportFile] = useState(null);
+    const [importConflict, setImportConflict] = useState("skip");
+    const [importing, setImporting] = useState(false);
+    const [importResult, setImportResult] = useState(null);
+    const importFileRef = useRef(null);
 
-    const clearViewState = () => {
-        navigate(location.pathname, { replace: true, state: {} });
+    const handleExport = async () => {
+        const tid = toast.loading("Preparing Excel export…");
+        try {
+            await exportPurchaseOrders();
+            toast.success("Purchase Orders exported", { id: tid });
+        } catch (err) {
+            toast.error("Export failed: " + err.message, { id: tid });
+        }
     };
 
-    const closeViewing = () => {
-        setViewing(null);
-        setViewStateHandled(true);
-        clearViewState();
+    const handleImport = async () => {
+        if (!importFile) return toast.error("Please select an Excel (.xlsx) or CSV file");
+        setImporting(true);
+        const tid = toast.loading("Importing…");
+        try {
+            const result = await importPurchaseOrders(importFile, importConflict);
+            setImportResult(result);
+            toast.success(
+                `Import done — Created: ${result.created}, Updated: ${result.updated}, Skipped: ${result.skipped}`,
+                { id: tid, duration: 6000 }
+            );
+            invalidate();
+        } catch (err) {
+            toast.error("Import failed: " + err.message, { id: tid });
+        } finally {
+            setImporting(false);
+        }
     };
 
     const [addClientOpen, setAddClientOpen] = useState(false);
@@ -153,32 +176,14 @@ const PurchaseOrders = () => {
             unitPrice: o.unit_price, gst: o.gst || "", freight: o.freight,
             project: o.project || "",
             paymentTerms: o.payment_terms || "",
-            remark: o.remark || "",
             validityDate: isoToDateInput(o.validity_date),
             fileUrl: o.file_url || "",
+            remark: o.remark || "",
             lineItems: li,
         });
         setDialogOpen(true);
     };
     const openView = (o) => { markOpenedMutation.mutate(o.id); setViewing(o); };
-
-    useEffect(() => {
-        if (!viewFromState || viewing || isLoading || viewStateHandled) return;
-        setViewStateHandled(true);
-        const matched = orders.find((o) => String(o.id) === String(viewFromState) || String(o.po_number) === String(viewFromState));
-        if (matched) {
-            openView(matched);
-            return;
-        }
-        fetchPurchaseOrder(viewFromState, getCurrentUser())
-            .then((o) => { if (o) setViewing(o); })
-            .catch(() => {});
-    }, [viewFromState, viewing, isLoading, orders, viewStateHandled]);
-
-    useEffect(() => {
-        if (viewFromState) setViewStateHandled(false);
-    }, [viewFromState]);
-
     const set = (field, val) => setForm((f) => ({ ...f, [field]: val }));
 
     const handleCreateClient = async () => {
@@ -299,6 +304,8 @@ const PurchaseOrders = () => {
         }
     };
 
+    
+
 
     const submit = async () => {
         const hasItems = (form.lineItems || []).some(li => li.item.trim());
@@ -313,9 +320,9 @@ const PurchaseOrders = () => {
             gst: form.gst || "0",
             freight: Number(form.freight) || 0,
             payment_terms: form.paymentTerms || null,
-            remark: form.remark || null,
             validity_date: form.validityDate ? new Date(form.validityDate).toISOString() : null,
             file_url: form.fileUrl || null,
+            remark: form.remark || null,
             line_items: (form.lineItems || []).map(li => ({
                 id: li.id || null,
                 item: li.item.trim(),
@@ -323,17 +330,16 @@ const PurchaseOrders = () => {
                 uom: li.uom || "Nos",
                 unit_price: Number(li.unit_price) || 0,
                 gst: li.gst || "0",
-                freight: Number(li.freight) || 0,
+                freight: Number(li.freight) || 0
             })).filter(li => li.item)
         };
         try {
-            if (editingId) {
-                await updateMutation.mutateAsync({ id: editingId, body: { ...payload, last_updated_by: getCurrentUser() } });
-                toast.success("Purchase Order updated");
-            } else {
-                await createMutation.mutateAsync({ ...payload, created_by: getCurrentUser() });
-                toast.success("Purchase Order created");
-            }
+            const tid = toast.loading(editingId ? "Updating PO..." : "Creating PO...");
+            const result = editingId 
+                ? await updateMutation.mutateAsync({ id: editingId, body: payload })
+                : await createMutation.mutateAsync(payload);
+            toast.success("Purchase Order " + (editingId ? "updated" : "created"), { id: tid });
+            invalidate();
             setDialogOpen(false);
         } catch (e) {
             toast.error(e.message);
@@ -347,13 +353,20 @@ const PurchaseOrders = () => {
                     <h2 className="text-2xl font-bold tracking-tight text-foreground">Purchase Orders</h2>
                     <p className="text-sm text-muted-foreground mt-1">Track POs with quantities, delivery progress and activity log.</p>
                 </div>
-                <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-                    <DialogTrigger asChild>
-                        <Button onClick={openNew} className="bg-gradient-primary hover:opacity-90 shadow-elegant">
-                            <Plus className="h-4 w-4 mr-2" /> New Purchase Order
-                        </Button>
-                    </DialogTrigger>
-                    <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
+                <div className="flex flex-wrap gap-2">
+                    <Button variant="outline" onClick={handleExport} className="border-green-500 text-green-700 hover:bg-green-50">
+                        <Download className="h-4 w-4 mr-2" /> Export Excel
+                    </Button>
+                    <Button variant="outline" onClick={() => { setImportFile(null); setImportResult(null); setImportOpen(true); }} className="border-blue-500 text-blue-700 hover:bg-blue-50">
+                        <Upload className="h-4 w-4 mr-2" /> Import Excel
+                    </Button>
+                    <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
+                        <DialogTrigger asChild>
+                            <Button onClick={openNew} className="bg-gradient-primary hover:opacity-90 shadow-elegant">
+                                <Plus className="h-4 w-4 mr-2" /> New Purchase Order
+                            </Button>
+                        </DialogTrigger>
+                        <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
                         <DialogHeader>
                             <DialogTitle>{editingId ? "Edit Purchase Order" : "Create Purchase Order"}</DialogTitle>
                         </DialogHeader>
@@ -640,6 +653,16 @@ const PurchaseOrders = () => {
                                 </Select>
                             </div>
 
+                            <div className="space-y-2 sm:col-span-2">
+                                <Label>Remark</Label>
+                                <Textarea
+                                    placeholder="Optional remarks for this Purchase Order..."
+                                    value={form.remark || ""}
+                                    onChange={(e) => set("remark", e.target.value)}
+                                    rows={2}
+                                />
+                            </div>
+
                             <div className="space-y-2">
                                 <Label>Upload PO Document</Label>
                                 <div className="flex items-center gap-2">
@@ -663,15 +686,6 @@ const PurchaseOrders = () => {
                                 </div>
                             </div>
 
-                            <div className="space-y-2 sm:col-span-2">
-                                <Label>Remark</Label>
-                                <Textarea 
-                                    placeholder="Enter purchase order remarks/comments..." 
-                                    value={form.remark || ""} 
-                                    onChange={(e) => set("remark", e.target.value)} 
-                                    className="min-h-[80px]"
-                                />
-                            </div>
 
                         </div>
                         <DialogFooter>
@@ -682,6 +696,7 @@ const PurchaseOrders = () => {
                         </DialogFooter>
                     </DialogContent>
                 </Dialog>
+                </div>
             </div>
 
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
@@ -757,19 +772,19 @@ const PurchaseOrders = () => {
                                         <td className="px-1.5 py-3 text-right text-warning font-bold whitespace-nowrap">{o.pending_quantity} <span className="text-[10px] font-normal text-muted-foreground">{o.uom || "Nos"}</span></td>
                                         <td className="px-1.5 py-3 text-muted-foreground whitespace-nowrap text-xs">{o.validity_date ? fmtDate(o.validity_date) : "—"}</td>
                                         <td className="px-1.5 py-3 scale-90 origin-left -mr-4">
-                                            <StatusBadge 
+                                            <StatusBadge
                                                 status={
                                                     o.short_closed ? "Short Closed" :
                                                     (o.delivery_status === "Delivered" && o.all_dispatches_marked) ? "Delivered" :
                                                     (o.delivery_status === "Delivered" || o.delivery_status === "Partial") ? "Partial" :
                                                     "Not Delivered"
-                                                } 
+                                                }
                                                 label={
                                                     o.short_closed ? "Short Closed" :
                                                     (o.delivery_status === "Delivered" && o.all_dispatches_marked) ? "Delivered" :
                                                     o.delivery_status === "Delivered" ? "Dispatched (Pending Challans)" :
                                                     o.delivery_status
-                                                } 
+                                                }
                                             />
                                         </td>
                                         <td className="px-1.5 py-3">
@@ -789,7 +804,7 @@ const PurchaseOrders = () => {
                                                             setUploadingPoId(o.id);
                                                             document.getElementById("direct-file-upload").click();
                                                         }
-                                                    }} 
+                                                    }}
                                                     title={o.file_url ? "View Uploaded PO" : "Upload PO Document"}
                                                 >
                                                     {o.file_url ? (
@@ -799,9 +814,11 @@ const PurchaseOrders = () => {
                                                     )}
                                                 </Button>
                                                 <Button size="icon" variant="ghost" className="h-6 w-6" onClick={() => openPODocument(o.id)} title="Print PO"><Printer className="h-3 w-3" /></Button>
-                                                <Button size="icon" variant="ghost" className="h-6 w-6" onClick={() => openEdit(o)} title="Edit" disabled={o.short_closed}><Pencil className={`h-3 w-3 ${o.short_closed ? 'text-muted-foreground' : 'text-blue-500'}`} /></Button>
+                                                <Button size="icon" variant="ghost" className="h-6 w-6" onClick={() => openEdit(o)} disabled={o.short_closed} title="Edit">
+                                                    <Pencil className={`h-3 w-3 ${o.short_closed ? "text-muted-foreground" : "text-blue-500"}`} />
+                                                </Button>
                                                 {o.delivery_status !== "Delivered" && !o.short_closed && (
-                                                    <Button size="sm" variant="outline" className="h-6 px-2 text-[10px] text-slate-600 border-slate-300" onClick={() => setShortCloseItem(o)} title="Short Close PO">
+                                                    <Button size="sm" variant="ghost" className="h-6 px-1.5 text-[10px] font-semibold text-slate-600 hover:bg-slate-100" onClick={() => setShortCloseItem(o)} title="Short Close PO">
                                                         Close
                                                     </Button>
                                                 )}
@@ -819,11 +836,7 @@ const PurchaseOrders = () => {
                 </div>
             </Card>
 
-            <Dialog open={!!viewing} onOpenChange={(o) => {
-                    if (!o) {
-                        closeViewing();
-                    }
-                }}>
+            <Dialog open={!!viewing} onOpenChange={(o) => !o && setViewing(null)}>
                 <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
                     <DialogHeader><DialogTitle>Purchase Order Details</DialogTitle></DialogHeader>
                     {viewing && (
@@ -832,19 +845,19 @@ const PurchaseOrders = () => {
                                 <Field label="PO Number" value={viewing.po_number} />
                                 <div className="space-y-1">
                                     <div className="text-[11px] uppercase tracking-wider text-muted-foreground">Delivery Status</div>
-                                    <StatusBadge 
+                                    <StatusBadge
                                         status={
                                             viewing.short_closed ? "Short Closed" :
                                             (viewing.delivery_status === "Delivered" && viewing.all_dispatches_marked) ? "Delivered" :
                                             (viewing.delivery_status === "Delivered" || viewing.delivery_status === "Partial") ? "Partial" :
                                             "Not Delivered"
-                                        } 
+                                        }
                                         label={
                                             viewing.short_closed ? "Short Closed" :
                                             (viewing.delivery_status === "Delivered" && viewing.all_dispatches_marked) ? "Delivered" :
                                             viewing.delivery_status === "Delivered" ? "Dispatched (Pending Challans)" :
                                             viewing.delivery_status
-                                        } 
+                                        }
                                     />
                                 </div>
                                 <Field label="Client" value={viewing.client_name} />
@@ -853,7 +866,7 @@ const PurchaseOrders = () => {
                                 <Field label="Validity Date" value={viewing.validity_date ? fmtDate(viewing.validity_date) : "—"} />
                                 <Field label="GST %" value={viewing.gst || "0%"} />
                                 <Field label="Freight" value={inr(viewing.freight)} />
-                                <Field label="Remark" value={viewing.remark} full />
+                                {viewing.remark && <Field label="Remark" value={viewing.remark} full />}
 
                                 {viewing.file_url && (
                                     <div className="col-span-2 mt-2">
@@ -870,31 +883,27 @@ const PurchaseOrders = () => {
                                         <tr>
                                             <th className="text-left px-3 py-2 font-medium text-muted-foreground">#</th>
                                             <th className="text-left px-3 py-2 font-medium text-muted-foreground">Item</th>
-                                            <th className="text-right px-3 py-2 font-medium text-muted-foreground">Req.</th>
-                                            <th className="text-right px-3 py-2 font-medium text-success">Delivered Quantity</th>
-                                            <th className="text-right px-3 py-2 font-medium text-warning">Pend.</th>
+                                            <th className="text-right px-3 py-2 font-medium text-muted-foreground">Qty</th>
+                                            <th className="text-right px-3 py-2 font-medium text-muted-foreground text-success">Delivered Quantity</th>
+                                            <th className="text-right px-3 py-2 font-medium text-muted-foreground text-warning">Pend.</th>
                                             <th className="text-left px-3 py-2 font-medium text-muted-foreground">UOM</th>
                                             <th className="text-right px-3 py-2 font-medium text-muted-foreground">Unit Price</th>
                                             <th className="text-right px-3 py-2 font-medium text-muted-foreground">Amount</th>
                                         </tr>
                                     </thead>
                                     <tbody>
-                                        {(viewing.line_items?.length > 0 ? viewing.line_items : [{ item: viewing.item, quantity: viewing.total_quantity, uom: viewing.uom, unit_price: viewing.unit_price, delivered_quantity: 0 }]).map((li, i) => {
-                                            const aftApr = li.delivered_quantity || 0;
-                                            const pend = Math.max(0, (li.quantity || 0) - aftApr);
-                                            return (
+                                        {(viewing.line_items?.length > 0 ? viewing.line_items : [{ item: viewing.item, quantity: viewing.total_quantity, uom: viewing.uom, unit_price: viewing.unit_price }]).map((li, i) => (
                                             <tr key={i} className="border-t border-border">
                                                 <td className="px-3 py-2 text-muted-foreground">{i + 1}</td>
                                                 <td className="px-3 py-2 font-medium">{li.item}</td>
                                                 <td className="px-3 py-2 text-right">{li.quantity}</td>
-                                                <td className="px-3 py-2 text-right text-success font-bold">{aftApr}</td>
-                                                <td className="px-3 py-2 text-right text-warning font-bold">{pend}</td>
+                                                <td className="px-3 py-2 text-right text-success font-bold">{li.delivered_quantity || 0}</td>
+                                                <td className="px-3 py-2 text-right text-warning font-bold">{Math.max(0, (li.quantity || 0) - (li.delivered_quantity || 0))}</td>
                                                 <td className="px-3 py-2">{li.uom || "Nos"}</td>
                                                 <td className="px-3 py-2 text-right">{inr(li.unit_price)}</td>
-                                                <td className="px-3 py-2 text-right font-semibold">{inr((li.quantity || 0) * (li.unit_price || 0))}</td>
+                                                <td className="px-3 py-2 text-right font-semibold">{inr(li.quantity * li.unit_price)}</td>
                                             </tr>
-                                            );
-                                        })}
+                                        ))}
                                     </tbody>
                                 </table>
                             </div>
@@ -906,23 +915,64 @@ const PurchaseOrders = () => {
                                 <ActivityEntry label="Last Updated By" by={viewing.last_updated_by} at={viewing.last_updated_at} color="warning" />
                                 <ActivityEntry label="Last Opened By" by={viewing.last_opened_by} at={viewing.last_opened_at} color="accent" />
                                 {viewing.short_closed && (
-                                    <ActivityEntry label="Short Closed By" by={viewing.short_closed_by} at={viewing.short_closed_at} color="slate-500" remark={viewing.short_closed_remark} />
+                                    <ActivityEntry
+                                        label="Short Closed By"
+                                        by={viewing.short_closed_by}
+                                        at={viewing.short_closed_at}
+                                        color="slate-500"
+                                        remark={viewing.short_closed_remark}
+                                    />
                                 )}
                             </div>
                         </div>
                     )}
                     <DialogFooter>
-                        <Button variant="outline" onClick={closeViewing}>Close</Button>
+                        <Button variant="outline" onClick={() => setViewing(null)}>Close</Button>
                         {viewing && (
                             <>
                                 <Button variant="outline" onClick={() => openPODocument(viewing.id)}>
                                     <Printer className="h-4 w-4 mr-2" /> Print PO
                                 </Button>
-                                <Button className="bg-gradient-primary" onClick={() => { const o = viewing; setViewing(null); openEdit(o); }}>
+                                <Button className="bg-gradient-primary" disabled={viewing.short_closed} onClick={() => { const o = viewing; setViewing(null); openEdit(o); }}>
                                     <Pencil className="h-4 w-4 mr-2" /> Edit
                                 </Button>
                             </>
                         )}
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
+
+            <Dialog open={!!shortCloseItem} onOpenChange={(open) => !open && setShortCloseItem(null)}>
+                <DialogContent className="sm:max-w-md">
+                    <DialogHeader><DialogTitle>Short Close Purchase Order</DialogTitle></DialogHeader>
+                    <div className="py-4 space-y-3">
+                        <p className="text-sm text-muted-foreground">
+                            Are you sure you want to short close <strong>{shortCloseItem?.po_number}</strong>?
+                            No further invoices or dispatches can be created against it.
+                        </p>
+                        <div className="space-y-1.5">
+                            <Label className="text-xs text-muted-foreground">Reason (optional)</Label>
+                            <Textarea
+                                placeholder="Enter reason for short closing..."
+                                value={shortCloseRemark}
+                                onChange={(e) => setShortCloseRemark(e.target.value)}
+                                rows={2}
+                            />
+                        </div>
+                    </div>
+                    <DialogFooter>
+                        <Button variant="outline" onClick={() => setShortCloseItem(null)}>Cancel</Button>
+                        <Button
+                            variant="default"
+                            className="bg-slate-700 hover:bg-slate-800"
+                            disabled={shortCloseMutation.isPending}
+                            onClick={() => {
+                                shortCloseMutation.mutate({
+                                    id: shortCloseItem.id,
+                                    body: { remark: shortCloseRemark || "", user: getCurrentUser() }
+                                });
+                            }}
+                        >Confirm Short Close</Button>
                     </DialogFooter>
                 </DialogContent>
             </Dialog>
@@ -940,31 +990,98 @@ const PurchaseOrders = () => {
                 </DialogContent>
             </Dialog>
 
-            <Dialog open={!!shortCloseItem} onOpenChange={(open) => !open && setShortCloseItem(null)}>
-                <DialogContent className="sm:max-w-md">
-                    <DialogHeader><DialogTitle>Short Close Purchase Order</DialogTitle></DialogHeader>
-                    <div className="py-4">
-                        <p className="text-sm text-muted-foreground">Are you sure you want to short close <strong>{shortCloseItem?.po_number}</strong>? No further invoices or dispatches can be created against it.</p>
+            <input
+                type="file"
+                id="direct-file-upload"
+                className="hidden"
+                accept=".pdf,.jpg,.jpeg,.png"
+                onChange={(e) => handleDirectUpload(e, uploadingPoId)}
+            />
+
+            {/* Import Dialog */}
+            <Dialog open={importOpen} onOpenChange={(o) => { setImportOpen(o); if (!o) { setImportFile(null); setImportResult(null); } }}>
+                <DialogContent className="sm:max-w-lg">
+                    <DialogHeader>
+                        <DialogTitle className="flex items-center gap-2">
+                            <Upload className="h-5 w-5 text-blue-600" /> Import Purchase Orders
+                        </DialogTitle>
+                    </DialogHeader>
+                    <div className="space-y-4 py-2">
+                        <p className="text-sm text-muted-foreground">
+                            Upload an Excel (.xlsx) file exported from this system. All fields will be auto-populated and validated before saving.
+                        </p>
+                        <div className="space-y-2">
+                            <Label>Select File (.xlsx or .csv)</Label>
+                            <div
+                                className="border-2 border-dashed border-border rounded-lg p-6 text-center cursor-pointer hover:border-primary transition-colors"
+                                onClick={() => importFileRef.current?.click()}
+                            >
+                                {importFile ? (
+                                    <div className="flex items-center justify-center gap-2 text-sm text-green-700">
+                                        <FileText className="h-4 w-4" />
+                                        <span className="font-medium">{importFile.name}</span>
+                                        <span className="text-muted-foreground">({(importFile.size / 1024).toFixed(1)} KB)</span>
+                                    </div>
+                                ) : (
+                                    <div className="text-muted-foreground text-sm">
+                                        <UploadCloud className="h-8 w-8 mx-auto mb-2 text-muted-foreground/50" />
+                                        Click to choose or drop a file here
+                                    </div>
+                                )}
+                            </div>
+                            <input
+                                ref={importFileRef}
+                                type="file"
+                                className="hidden"
+                                accept=".xlsx,.csv,.json"
+                                onChange={(e) => { setImportFile(e.target.files[0] || null); setImportResult(null); }}
+                            />
+                        </div>
+                        <div className="space-y-2">
+                            <Label>If PO Number already exists</Label>
+                            <Select value={importConflict} onValueChange={setImportConflict}>
+                                <SelectTrigger>
+                                    <SelectValue />
+                                </SelectTrigger>
+                                <SelectContent>
+                                    <SelectItem value="skip">Skip — keep existing record (safe)</SelectItem>
+                                    <SelectItem value="update">Update — overwrite header fields</SelectItem>
+                                </SelectContent>
+                            </Select>
+                        </div>
+                        {importResult && (
+                            <div className="rounded-lg border border-border bg-muted/40 p-3 text-sm space-y-1">
+                                <div className="font-semibold text-foreground mb-2">Import Results</div>
+                                <div className="flex gap-4 flex-wrap">
+                                    <span className="text-green-700">Created: <strong>{importResult.created}</strong></span>
+                                    <span className="text-blue-700">Updated: <strong>{importResult.updated}</strong></span>
+                                    <span className="text-orange-600">Skipped: <strong>{importResult.skipped}</strong></span>
+                                </div>
+                                {importResult.errors?.length > 0 && (
+                                    <div className="mt-2">
+                                        <div className="text-destructive font-medium text-xs mb-1">Errors ({importResult.errors.length}):</div>
+                                        <ul className="space-y-0.5 max-h-28 overflow-y-auto">
+                                            {importResult.errors.map((e, i) => (
+                                                <li key={i} className="text-destructive text-xs">• {e}</li>
+                                            ))}
+                                        </ul>
+                                    </div>
+                                )}
+                            </div>
+                        )}
                     </div>
                     <DialogFooter>
-                        <Button variant="outline" onClick={() => setShortCloseItem(null)}>Cancel</Button>
-                        <Button variant="default" className="bg-slate-700 hover:bg-slate-800" disabled={shortCloseMutation.isPending} onClick={() => { 
-                            shortCloseMutation.mutate({ 
-                                id: shortCloseItem.id, 
-                                body: { remark: "", user: getCurrentUser() } 
-                            }); 
-                        }}>Confirm Short Close</Button>
+                        <Button variant="outline" onClick={() => setImportOpen(false)}>Close</Button>
+                        <Button
+                            onClick={handleImport}
+                            disabled={!importFile || importing}
+                            className="bg-blue-600 hover:bg-blue-700 text-white"
+                        >
+                            {importing ? "Importing…" : "Import"}
+                        </Button>
                     </DialogFooter>
                 </DialogContent>
             </Dialog>
-
-            <input 
-                type="file" 
-                id="direct-file-upload" 
-                className="hidden" 
-                accept=".pdf,.jpg,.jpeg,.png"
-                onChange={(e) => handleDirectUpload(e, uploadingPoId)} 
-            />
         </div>
     );
 };
