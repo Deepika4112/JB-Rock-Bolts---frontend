@@ -72,7 +72,7 @@ const SalesInvoice = () => {
     const [paymentNote, setPaymentNote] = useState("");
     const [invoiceUrl, setInvoiceUrl] = useState("");
     const [eWayBillUrl, setEWayBillUrl] = useState("");
-    const [dispatchFrom, setDispatchFrom] = useState("JB ROCK BOLTS, Survey No. 11/1, Near Hanuman Temple, Gothiva, Vadodara, Gujarat - 391110");
+    const [dispatchFrom, setDispatchFrom] = useState("");
     const [shipTo, setShipTo] = useState("");
     const [billTo, setBillTo] = useState("");
     const [manualInvoiceNumber, setManualInvoiceNumber] = useState("");
@@ -124,7 +124,9 @@ const SalesInvoice = () => {
             basePending = pendingOnPO(poData);
         } else {
             const li = poData.line_items?.find(x => x.id.toString() === lineItemId.toString());
-            basePending = li ? (li.quantity - li.delivered_quantity) : 0;
+            if (li) {
+                basePending = Math.max(0, li.quantity - li.delivered_quantity);
+            }
         }
         const alreadyStaged = dispatchItems
             .filter(item => {
@@ -142,6 +144,22 @@ const SalesInvoice = () => {
         const subtotal = unitPrice * qty;
         const gstAmount = Math.round(subtotal * gstRate / 100);
         return { unitPrice, freight, gstRate, gstAmount, subtotal, grandTotal: subtotal + gstAmount + freight };
+    };
+
+    const applyManualTotalGstRate = (items, manualTotalGstRate) => {
+        const processed = items.map((item) => ({ ...item }));
+        if (manualTotalGstRate !== "") {
+            const subtotal = processed.reduce((acc, item) => acc + (Number(item.subtotal) || 0), 0);
+            const targetGst = Math.round(subtotal * (Number(manualTotalGstRate) / 100));
+            const currentGst = processed.reduce((acc, item) => acc + (Number(item.gst_amount) || 0), 0);
+            const diff = targetGst - currentGst;
+            if (diff !== 0 && processed.length > 0) {
+                const lastIndex = processed.length - 1;
+                processed[lastIndex].gst_amount = (Number(processed[lastIndex].gst_amount) || 0) + diff;
+                processed[lastIndex].total_amount = (Number(processed[lastIndex].subtotal) || 0) + processed[lastIndex].gst_amount;
+            }
+        }
+        return processed;
     };
 
     const handlePOChange = (poNumber) => {
@@ -463,22 +481,14 @@ const SalesInvoice = () => {
         if (!poData) { toast.error("Select a PO first"); return; }
         if (dispatchItems.length === 0) { toast.error("Add at least one item"); return; }
 
-        const subtotal = dispatchItems.reduce((acc, item) => acc + item.subtotal, 0);
-        let gst_amount = dispatchItems.reduce((acc, item) => acc + item.gst_amount, 0);
-
+        const subtotal = dispatchItems.reduce((acc, item) => acc + (Number(item.subtotal) || 0), 0);
+        const freight = Number(manualFreight) || 0;
+        const itemsToSave = applyManualTotalGstRate(dispatchItems, manualTotalGstRate);
+        let gst_amount = itemsToSave.reduce((acc, item) => acc + (Number(item.gst_amount) || 0), 0);
         if (manualTotalGstRate !== "") {
             gst_amount = Math.round(subtotal * (Number(manualTotalGstRate) / 100));
-            // Distribute difference to last item
-            const currentSum = dispatchItems.reduce((acc, item) => acc + (Number(item.gst_amount) || 0), 0);
-            const diff = gst_amount - currentSum;
-            if (diff !== 0 && dispatchItems.length > 0) {
-                const lastIdx = dispatchItems.length - 1;
-                dispatchItems[lastIdx].gst_amount = (Number(dispatchItems[lastIdx].gst_amount) || 0) + diff;
-                dispatchItems[lastIdx].total_amount = (Number(dispatchItems[lastIdx].subtotal) || 0) + dispatchItems[lastIdx].gst_amount;
-            }
         }
 
-        const freight = Number(manualFreight) || 0;
         const grand_total = subtotal + gst_amount + freight;
 
         try {
@@ -487,7 +497,7 @@ const SalesInvoice = () => {
                 po_number: poData.po_number,
                 client_name: poData.client_name,
                 project: poData.project,
-                items: dispatchItems,
+                items: itemsToSave,
                 subtotal,
                 gst_amount,
                 freight,
@@ -545,20 +555,11 @@ const SalesInvoice = () => {
                 }))
             ];
 
-            // Recalculate totals for perfect consistency
-            const subtotal = combinedItems.reduce((acc, item) => acc + (Number(item.subtotal) || 0), 0);
-            let gst_amount = combinedItems.reduce((acc, item) => acc + (Number(item.gst_amount) || 0), 0);
-
+            const itemsToSave = applyManualTotalGstRate(combinedItems, manualTotalGstRate);
+            const subtotal = itemsToSave.reduce((acc, item) => acc + (Number(item.subtotal) || 0), 0);
+            let gst_amount = itemsToSave.reduce((acc, item) => acc + (Number(item.gst_amount) || 0), 0);
             if (manualTotalGstRate !== "") {
                 gst_amount = Math.round(subtotal * (Number(manualTotalGstRate) / 100));
-                // Distribute difference to last item to maintain item-sum consistency
-                const currentSum = combinedItems.reduce((acc, item) => acc + (Number(item.gst_amount) || 0), 0);
-                const diff = gst_amount - currentSum;
-                if (diff !== 0 && combinedItems.length > 0) {
-                    const lastIdx = combinedItems.length - 1;
-                    combinedItems[lastIdx].gst_amount = (Number(combinedItems[lastIdx].gst_amount) || 0) + diff;
-                    combinedItems[lastIdx].total_amount = (Number(combinedItems[lastIdx].subtotal) || 0) + combinedItems[lastIdx].gst_amount;
-                }
             }
 
             const freight = Number(dispatchTarget.freight) || 0;
@@ -568,7 +569,7 @@ const SalesInvoice = () => {
                 await updateMutation.mutateAsync({
                     id: dispatchTarget.id,
                     body: {
-                        items: combinedItems,
+                        items: itemsToSave,
                         subtotal,
                         gst_amount,
                         grand_total,
@@ -598,10 +599,9 @@ const SalesInvoice = () => {
             }
         } else {
             // CREATE NEW SALE
-            const subtotal = dispatchItems.reduce((acc, item) => acc + item.subtotal, 0);
-            const calculatedGstAmt = dispatchItems.reduce((acc, item) => acc + item.gst_amount, 0);
-
-            let gst_amount = calculatedGstAmt;
+            const subtotal = dispatchItems.reduce((acc, item) => acc + (Number(item.subtotal) || 0), 0);
+            const itemsToSave = applyManualTotalGstRate(dispatchItems, manualTotalGstRate);
+            let gst_amount = itemsToSave.reduce((acc, item) => acc + (Number(item.gst_amount) || 0), 0);
             if (manualTotalGstRate !== "") {
                 gst_amount = Math.round(subtotal * (Number(manualTotalGstRate) / 100));
             }
@@ -614,7 +614,7 @@ const SalesInvoice = () => {
                     po_number: poData.po_number,
                     client_name: poData.client_name,
                     project: poData.project,
-                    items: dispatchItems,
+                    items: itemsToSave,
                     subtotal,
                     gst_amount,
                     freight: 0,
@@ -754,19 +754,7 @@ const SalesInvoice = () => {
                     gst_amount: editGstAmount,
                     grand_total: editGrandTotal,
                     items: (() => {
-                        const items = [...editItems];
-                        if (editManualTotalGstRate !== "") {
-                            const currentSum = items.reduce((acc, it) => acc + (Number(it.gst_amount) || 0), 0);
-                            const diff = editGstAmount - currentSum;
-                            if (diff !== 0 && items.length > 0) {
-                                const last = items.length - 1;
-                                items[last] = {
-                                    ...items[last],
-                                    gst_amount: (Number(items[last].gst_amount) || 0) + diff,
-                                    total_amount: (Number(items[last].subtotal) || 0) + (Number(items[last].gst_amount) || 0) + diff
-                                };
-                            }
-                        }
+                        const items = applyManualTotalGstRate(editItems, editManualTotalGstRate);
                         return items.map(it => {
                             const liId = parseInt(it.line_item_id);
                             return {
