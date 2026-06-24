@@ -1,8 +1,10 @@
-import { useMemo, useState } from "react";
+import { useMemo, useState, useEffect } from "react";
+import { useLocation, useNavigate } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -13,27 +15,23 @@ import { useConstants } from "@/lib/constants";
 import {
     fetchPurchaseOrders, createPurchaseOrder, updatePurchaseOrder,
     deletePurchaseOrder, fetchPurchaseOrder, openPODocument,
-    createClient, createProject, fetchProjects, uploadPOFile
+    createClient, createProject, fetchProjects, uploadPOFile, shortClosePurchaseOrder
 } from "@/lib/api";
 import { Pencil, Plus, Search, Trash2, Eye, FileText, Package, Truck, Clock, Printer, X, UploadCloud } from "lucide-react";
 import { toast } from "sonner";
 
-const generatePONumber = () => {
-    const now = new Date();
-    const datePart = now.toISOString().slice(0, 10).replace(/-/g, "");
-    const timePart = now.toTimeString().slice(0, 8).replace(/:/g, "");
-    return `PO-${datePart}-${timePart}`;
-};
+
 
 const emptyLineItem = () => ({ item: "", quantity: "", uom: "Nos", unit_price: "", gst: "0", freight: "" });
 
 const empty = () => ({
     clientName: "", clientDropdown: "",
-    poNumber: generatePONumber(),
+    poNumber: "",
     validityDate: new Date().toISOString().slice(0, 10),
     gst: "", freight: 0,
     project: "",
     paymentTerms: "",
+    remark: "",
     fileUrl: "",
     lineItems: [emptyLineItem()],
 });
@@ -63,6 +61,18 @@ const PurchaseOrders = () => {
             toast.error(err.message || "Failed to delete Purchase Order");
         }
     });
+    const shortCloseMutation = useMutation({
+        mutationFn: ({ id, body }) => shortClosePurchaseOrder(id, body),
+        onSuccess: () => {
+            invalidate();
+            toast.success("Purchase Order Short Closed successfully");
+            setShortCloseItem(null);
+            setShortCloseRemark("");
+        },
+        onError: (err) => {
+            toast.error(err.message || "Failed to short close Purchase Order");
+        }
+    });
     const markOpenedMutation = useMutation({ mutationFn: (id) => fetchPurchaseOrder(id, getCurrentUser()), onSuccess: invalidate });
 
     const clientMutation = useMutation({ mutationFn: createClient, onSuccess: () => qc.invalidateQueries({ queryKey: ["constants"] }) });
@@ -75,6 +85,23 @@ const PurchaseOrders = () => {
     const [viewing, setViewing] = useState(null);
     const [uploadingPoId, setUploadingPoId] = useState(null);
     const [itemToDelete, setItemToDelete] = useState(null);
+    const [shortCloseItem, setShortCloseItem] = useState(null);
+    const [shortCloseRemark, setShortCloseRemark] = useState("");
+    const [viewStateHandled, setViewStateHandled] = useState(false);
+
+    const navigate = useNavigate();
+    const location = useLocation();
+    const viewFromState = location.state?.viewId;
+
+    const clearViewState = () => {
+        navigate(location.pathname, { replace: true, state: {} });
+    };
+
+    const closeViewing = () => {
+        setViewing(null);
+        setViewStateHandled(true);
+        clearViewState();
+    };
 
     const [addClientOpen, setAddClientOpen] = useState(false);
     const [addProjectOpen, setAddProjectOpen] = useState(false);
@@ -126,6 +153,7 @@ const PurchaseOrders = () => {
             unitPrice: o.unit_price, gst: o.gst || "", freight: o.freight,
             project: o.project || "",
             paymentTerms: o.payment_terms || "",
+            remark: o.remark || "",
             validityDate: isoToDateInput(o.validity_date),
             fileUrl: o.file_url || "",
             lineItems: li,
@@ -133,6 +161,24 @@ const PurchaseOrders = () => {
         setDialogOpen(true);
     };
     const openView = (o) => { markOpenedMutation.mutate(o.id); setViewing(o); };
+
+    useEffect(() => {
+        if (!viewFromState || viewing || isLoading || viewStateHandled) return;
+        setViewStateHandled(true);
+        const matched = orders.find((o) => String(o.id) === String(viewFromState) || String(o.po_number) === String(viewFromState));
+        if (matched) {
+            openView(matched);
+            return;
+        }
+        fetchPurchaseOrder(viewFromState, getCurrentUser())
+            .then((o) => { if (o) setViewing(o); })
+            .catch(() => {});
+    }, [viewFromState, viewing, isLoading, orders, viewStateHandled]);
+
+    useEffect(() => {
+        if (viewFromState) setViewStateHandled(false);
+    }, [viewFromState]);
+
     const set = (field, val) => setForm((f) => ({ ...f, [field]: val }));
 
     const handleCreateClient = async () => {
@@ -267,6 +313,7 @@ const PurchaseOrders = () => {
             gst: form.gst || "0",
             freight: Number(form.freight) || 0,
             payment_terms: form.paymentTerms || null,
+            remark: form.remark || null,
             validity_date: form.validityDate ? new Date(form.validityDate).toISOString() : null,
             file_url: form.fileUrl || null,
             line_items: (form.lineItems || []).map(li => ({
@@ -276,7 +323,7 @@ const PurchaseOrders = () => {
                 uom: li.uom || "Nos",
                 unit_price: Number(li.unit_price) || 0,
                 gst: li.gst || "0",
-                freight: Number(li.freight) || 0
+                freight: Number(li.freight) || 0,
             })).filter(li => li.item)
         };
         try {
@@ -616,6 +663,15 @@ const PurchaseOrders = () => {
                                 </div>
                             </div>
 
+                            <div className="space-y-2 sm:col-span-2">
+                                <Label>Remark</Label>
+                                <Textarea 
+                                    placeholder="Enter purchase order remarks/comments..." 
+                                    value={form.remark || ""} 
+                                    onChange={(e) => set("remark", e.target.value)} 
+                                    className="min-h-[80px]"
+                                />
+                            </div>
 
                         </div>
                         <DialogFooter>
@@ -703,11 +759,13 @@ const PurchaseOrders = () => {
                                         <td className="px-1.5 py-3 scale-90 origin-left -mr-4">
                                             <StatusBadge 
                                                 status={
+                                                    o.short_closed ? "Short Closed" :
                                                     (o.delivery_status === "Delivered" && o.all_dispatches_marked) ? "Delivered" :
                                                     (o.delivery_status === "Delivered" || o.delivery_status === "Partial") ? "Partial" :
                                                     "Not Delivered"
                                                 } 
                                                 label={
+                                                    o.short_closed ? "Short Closed" :
                                                     (o.delivery_status === "Delivered" && o.all_dispatches_marked) ? "Delivered" :
                                                     o.delivery_status === "Delivered" ? "Dispatched (Pending Challans)" :
                                                     o.delivery_status
@@ -741,7 +799,12 @@ const PurchaseOrders = () => {
                                                     )}
                                                 </Button>
                                                 <Button size="icon" variant="ghost" className="h-6 w-6" onClick={() => openPODocument(o.id)} title="Print PO"><Printer className="h-3 w-3" /></Button>
-                                                <Button size="icon" variant="ghost" className="h-6 w-6" onClick={() => openEdit(o)} title="Edit"><Pencil className="h-3 w-3 text-blue-500" /></Button>
+                                                <Button size="icon" variant="ghost" className="h-6 w-6" onClick={() => openEdit(o)} title="Edit" disabled={o.short_closed}><Pencil className={`h-3 w-3 ${o.short_closed ? 'text-muted-foreground' : 'text-blue-500'}`} /></Button>
+                                                {o.delivery_status !== "Delivered" && !o.short_closed && (
+                                                    <Button size="sm" variant="outline" className="h-6 px-2 text-[10px] text-slate-600 border-slate-300" onClick={() => setShortCloseItem(o)} title="Short Close PO">
+                                                        Close
+                                                    </Button>
+                                                )}
                                                 <Button size="icon" variant="ghost" className="h-6 w-6" onClick={() => setItemToDelete(o.id)} title="Delete"><Trash2 className="h-3 w-3 text-destructive" /></Button>
                                             </div>
                                         </td>
@@ -756,7 +819,11 @@ const PurchaseOrders = () => {
                 </div>
             </Card>
 
-            <Dialog open={!!viewing} onOpenChange={(o) => !o && setViewing(null)}>
+            <Dialog open={!!viewing} onOpenChange={(o) => {
+                    if (!o) {
+                        closeViewing();
+                    }
+                }}>
                 <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
                     <DialogHeader><DialogTitle>Purchase Order Details</DialogTitle></DialogHeader>
                     {viewing && (
@@ -767,11 +834,13 @@ const PurchaseOrders = () => {
                                     <div className="text-[11px] uppercase tracking-wider text-muted-foreground">Delivery Status</div>
                                     <StatusBadge 
                                         status={
+                                            viewing.short_closed ? "Short Closed" :
                                             (viewing.delivery_status === "Delivered" && viewing.all_dispatches_marked) ? "Delivered" :
                                             (viewing.delivery_status === "Delivered" || viewing.delivery_status === "Partial") ? "Partial" :
                                             "Not Delivered"
                                         } 
                                         label={
+                                            viewing.short_closed ? "Short Closed" :
                                             (viewing.delivery_status === "Delivered" && viewing.all_dispatches_marked) ? "Delivered" :
                                             viewing.delivery_status === "Delivered" ? "Dispatched (Pending Challans)" :
                                             viewing.delivery_status
@@ -784,6 +853,7 @@ const PurchaseOrders = () => {
                                 <Field label="Validity Date" value={viewing.validity_date ? fmtDate(viewing.validity_date) : "—"} />
                                 <Field label="GST %" value={viewing.gst || "0%"} />
                                 <Field label="Freight" value={inr(viewing.freight)} />
+                                <Field label="Remark" value={viewing.remark} full />
 
                                 {viewing.file_url && (
                                     <div className="col-span-2 mt-2">
@@ -800,27 +870,31 @@ const PurchaseOrders = () => {
                                         <tr>
                                             <th className="text-left px-3 py-2 font-medium text-muted-foreground">#</th>
                                             <th className="text-left px-3 py-2 font-medium text-muted-foreground">Item</th>
-                                            <th className="text-right px-3 py-2 font-medium text-muted-foreground">Qty</th>
-                                            <th className="text-right px-3 py-2 font-medium text-muted-foreground text-success">Del.</th>
-                                            <th className="text-right px-3 py-2 font-medium text-muted-foreground text-warning">Pend.</th>
+                                            <th className="text-right px-3 py-2 font-medium text-muted-foreground">Req.</th>
+                                            <th className="text-right px-3 py-2 font-medium text-success">Delivered Quantity</th>
+                                            <th className="text-right px-3 py-2 font-medium text-warning">Pend.</th>
                                             <th className="text-left px-3 py-2 font-medium text-muted-foreground">UOM</th>
                                             <th className="text-right px-3 py-2 font-medium text-muted-foreground">Unit Price</th>
                                             <th className="text-right px-3 py-2 font-medium text-muted-foreground">Amount</th>
                                         </tr>
                                     </thead>
                                     <tbody>
-                                        {(viewing.line_items?.length > 0 ? viewing.line_items : [{ item: viewing.item, quantity: viewing.total_quantity, uom: viewing.uom, unit_price: viewing.unit_price }]).map((li, i) => (
+                                        {(viewing.line_items?.length > 0 ? viewing.line_items : [{ item: viewing.item, quantity: viewing.total_quantity, uom: viewing.uom, unit_price: viewing.unit_price, delivered_quantity: 0 }]).map((li, i) => {
+                                            const aftApr = li.delivered_quantity || 0;
+                                            const pend = Math.max(0, (li.quantity || 0) - aftApr);
+                                            return (
                                             <tr key={i} className="border-t border-border">
                                                 <td className="px-3 py-2 text-muted-foreground">{i + 1}</td>
                                                 <td className="px-3 py-2 font-medium">{li.item}</td>
                                                 <td className="px-3 py-2 text-right">{li.quantity}</td>
-                                                <td className="px-3 py-2 text-right text-success font-bold">{li.delivered_quantity || 0}</td>
-                                                <td className="px-3 py-2 text-right text-warning font-bold">{Math.max(0, (li.quantity || 0) - (li.delivered_quantity || 0))}</td>
+                                                <td className="px-3 py-2 text-right text-success font-bold">{aftApr}</td>
+                                                <td className="px-3 py-2 text-right text-warning font-bold">{pend}</td>
                                                 <td className="px-3 py-2">{li.uom || "Nos"}</td>
                                                 <td className="px-3 py-2 text-right">{inr(li.unit_price)}</td>
-                                                <td className="px-3 py-2 text-right font-semibold">{inr(li.quantity * li.unit_price)}</td>
+                                                <td className="px-3 py-2 text-right font-semibold">{inr((li.quantity || 0) * (li.unit_price || 0))}</td>
                                             </tr>
-                                        ))}
+                                            );
+                                        })}
                                     </tbody>
                                 </table>
                             </div>
@@ -831,11 +905,14 @@ const PurchaseOrders = () => {
                                 <ActivityEntry label="Created By" by={viewing.created_by} at={viewing.created_at} color="primary" />
                                 <ActivityEntry label="Last Updated By" by={viewing.last_updated_by} at={viewing.last_updated_at} color="warning" />
                                 <ActivityEntry label="Last Opened By" by={viewing.last_opened_by} at={viewing.last_opened_at} color="accent" />
+                                {viewing.short_closed && (
+                                    <ActivityEntry label="Short Closed By" by={viewing.short_closed_by} at={viewing.short_closed_at} color="slate-500" remark={viewing.short_closed_remark} />
+                                )}
                             </div>
                         </div>
                     )}
                     <DialogFooter>
-                        <Button variant="outline" onClick={() => setViewing(null)}>Close</Button>
+                        <Button variant="outline" onClick={closeViewing}>Close</Button>
                         {viewing && (
                             <>
                                 <Button variant="outline" onClick={() => openPODocument(viewing.id)}>
@@ -863,6 +940,24 @@ const PurchaseOrders = () => {
                 </DialogContent>
             </Dialog>
 
+            <Dialog open={!!shortCloseItem} onOpenChange={(open) => !open && setShortCloseItem(null)}>
+                <DialogContent className="sm:max-w-md">
+                    <DialogHeader><DialogTitle>Short Close Purchase Order</DialogTitle></DialogHeader>
+                    <div className="py-4">
+                        <p className="text-sm text-muted-foreground">Are you sure you want to short close <strong>{shortCloseItem?.po_number}</strong>? No further invoices or dispatches can be created against it.</p>
+                    </div>
+                    <DialogFooter>
+                        <Button variant="outline" onClick={() => setShortCloseItem(null)}>Cancel</Button>
+                        <Button variant="default" className="bg-slate-700 hover:bg-slate-800" disabled={shortCloseMutation.isPending} onClick={() => { 
+                            shortCloseMutation.mutate({ 
+                                id: shortCloseItem.id, 
+                                body: { remark: "", user: getCurrentUser() } 
+                            }); 
+                        }}>Confirm Short Close</Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
+
             <input 
                 type="file" 
                 id="direct-file-upload" 
@@ -881,12 +976,13 @@ const Field = ({ label, value, full }) => (
     </div>
 );
 
-const ActivityEntry = ({ label, by, at, color }) => (
+const ActivityEntry = ({ label, by, at, color, remark }) => (
     <div className={`flex items-start gap-3 text-xs border-l-2 border-${color}/40 pl-3`}>
         <div className="flex-1">
             <div className="text-[10px] uppercase tracking-wider text-muted-foreground">{label}</div>
             <div className="font-semibold text-foreground">{by || "—"}</div>
             <div className="text-muted-foreground">{at ? fmtDateTime(at) : "—"}</div>
+            {remark && <div className="mt-1 text-muted-foreground italic border-l-2 border-muted pl-2">"{remark}"</div>}
         </div>
     </div>
 );
